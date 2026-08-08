@@ -121,7 +121,18 @@ pub struct Config {
 }
 
 impl Config {
-    /// RFC 7493 + RFC 8785. What an authorization pipeline must use.
+    /// RFC 7493 + RFC 8785, **plus** a deliberate policy choice stricter
+    /// than either RFC requires: `NumberPolicy::RejectOutOfRange` rejects
+    /// any integer-valued literal outside ±(2^53 − 1), full stop. Neither
+    /// RFC actually forbids `1e20` or `1e21` — RFC 7493 §2.2's guidance
+    /// there is a `SHOULD NOT`, not a `MUST`, and it targets magnitude or
+    /// precision *beyond* what an IEEE-754 double provides; `1e20` and
+    /// `1e21` are exactly representable, so nothing in either RFC would
+    /// reject them. The blunt ±(2^53 − 1) cutoff is a fail-closed choice
+    /// made here on purpose, because the actual hazard is integers that are
+    /// *not* exactly representable, which is precisely where real decoders
+    /// (arbitrary-precision vs. IEEE-754) are observed to disagree — see
+    /// `jcs::es_number`. What an authorization pipeline must use.
     pub const fn strict() -> Self {
         Config {
             duplicates: DuplicatePolicy::Reject,

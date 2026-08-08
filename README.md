@@ -9,7 +9,10 @@ Supporting tool for **P02 — From Message Authorization to Effect Binding**.
 ## What is real and what is modelled
 
 **Real.** The strict I-JSON parser and the RFC 8785 canonicalizer are
-implemented here and tested against the specifications. The divergences
+implemented here and tested against the specifications — with one
+deliberate, documented departure: the strict parser's number policy rejects
+any out-of-range integer literal outright, a stricter fail-closed rule than
+either RFC requires (see `Config::strict` in `src/json.rs`). The divergences
 `transit differential` reports between language runtimes are *measured* on
 the host that ran it, by executing those runtimes. The hostile server's
 behaviour is real behaviour of a real server — it is simply a server that
