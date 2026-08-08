@@ -452,8 +452,16 @@ impl<'a> P<'a> {
         if self.i + 4 > self.b.len() {
             return Err(self.syntax("truncated \\u escape"));
         }
-        let s = std::str::from_utf8(&self.b[self.i..self.i + 4])
-            .map_err(|_| self.syntax("bad \\u escape"))?;
+        let raw = &self.b[self.i..self.i + 4];
+        // RFC 8259 §7: `\u` is followed by exactly `4HEXDIG`, no sign.
+        // `u16::from_str_radix` accepts a leading `+` (and would accept `-`
+        // if the target type allowed negatives), which would let
+        // `\u+041` parse as U+0041 — input every real decoder rejects as a
+        // syntax error.
+        if !raw.iter().all(u8::is_ascii_hexdigit) {
+            return Err(self.syntax("bad \\u escape"));
+        }
+        let s = std::str::from_utf8(raw).map_err(|_| self.syntax("bad \\u escape"))?;
         let v = u16::from_str_radix(s, 16).map_err(|_| self.syntax("bad \\u escape"))?;
         self.i += 4;
         Ok(v)
@@ -664,6 +672,15 @@ mod tests {
         // from the fact that production decoders do not.
         let err = parse_strict(DUP).unwrap_err();
         assert!(matches!(err, JsonError::DuplicateKey { .. }), "got {err}");
+
+        // The identity the duplicate check uses is the *decoded* key, not
+        // the source spelling: `"a"` and `"\u0061"` are two spellings of the
+        // same key and must still collide. `DUP` uses byte-identical
+        // spellings on both sides and so pins nothing about this; this is
+        // RFC 8785 §3.1's confusable-key case.
+        let escaped = "{\"a\":1,\"\\u0061\":2}";
+        let err2 = parse_strict(escaped).unwrap_err();
+        assert!(matches!(err2, JsonError::DuplicateKey { .. }), "got {err2}");
     }
 
     #[test]
@@ -706,21 +723,136 @@ mod tests {
             Some(&Json::String(vec![0xD800])),
             "Node retains"
         );
+
+        // RFC 7493 §2.1 forbids an unpaired surrogate in *either* direction.
+        // The cases above only exercise a lone high surrogate; a lone low
+        // surrogate takes a separate branch in `unicode_escape` and must be
+        // rejected by strict mode too.
+        let lo_src = r#"{"a":"\udc00"}"#;
+        assert!(matches!(
+            parse(lo_src, Config::strict()).unwrap_err(),
+            JsonError::LoneSurrogate { cp: 0xDC00, .. }
+        ));
     }
 
     #[test]
     fn a_well_formed_surrogate_pair_survives_every_policy() {
-        for cfg in [
-            Config::strict(),
-            Config::go_encoding_json(),
-            Config::node_json_parse(),
-        ] {
-            let j = parse(r#"{"a":"😀"}"#, cfg).unwrap();
-            assert_eq!(
-                j.get("a"),
-                Some(&Json::String(vec![0xD83D, 0xDE00])),
-                "{cfg:?}"
+        // The raw emoji takes the direct-UTF-8 branch in `string()` and
+        // never enters `unicode_escape` at all. The escaped spelling is a
+        // separate code path — the paired-surrogate branch — and needs its
+        // own coverage, or a mutation there (e.g. the lookahead check that
+        // confirms the second half is really a low surrogate) can pass
+        // every existing test while breaking that branch outright.
+        let raw = "{\"a\":\"\u{1F600}\"}";
+        let escaped = "{\"a\":\"\\ud83d\\ude00\"}";
+        for src in [raw, escaped] {
+            for cfg in [
+                Config::strict(),
+                Config::go_encoding_json(),
+                Config::node_json_parse(),
+            ] {
+                let j = parse(src, cfg).unwrap();
+                assert_eq!(
+                    j.get("a"),
+                    Some(&Json::String(vec![0xD83D, 0xDE00])),
+                    "{src} {cfg:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_high_surrogate_followed_by_an_unrelated_escape_keeps_both() {
+        // The second escape here is a `u`-escape, so the lookahead in
+        // `unicode_escape` starts speculatively decoding it as a candidate
+        // low surrogate — but it decodes to a value outside the
+        // low-surrogate range, so the parser must rewind to before that
+        // escape and re-emit it as its own character, not swallow it while
+        // discovering the pairing failed. A silently dropped character is
+        // exactly the failure class this crate exists to expose.
+        let src = "{\"a\":\"\\ud800\\u0041\"}";
+        let j = parse(src, Config::node_json_parse()).unwrap();
+        assert_eq!(j.get("a"), Some(&Json::String(vec![0xD800, 0x0041])));
+    }
+
+    #[test]
+    fn noncharacters_are_rejected_by_strict_and_accepted_by_a_lenient_config() {
+        // RFC 7493 §2.1 forbids noncharacters (U+FDD0..=U+FDEF, and the
+        // last two code points of every plane), whether the source spells
+        // one as a `\u` escape or as raw UTF-8, whether it comes from a
+        // single escape or a well-formed surrogate pair, and whether it
+        // appears as a key or a value. `NoncharacterPolicy` has two
+        // settings and a lenient config must accept every one of these.
+
+        // Escaped spellings, single-unit noncharacters.
+        for esc in ["\\ufdd0", "\\ufdef", "\\ufffe", "\\uffff"] {
+            let src = format!("{{\"a\":\"{esc}\"}}");
+            assert!(
+                matches!(
+                    parse_strict(&src).unwrap_err(),
+                    JsonError::NonCharacter { .. }
+                ),
+                "expected NonCharacter for {src:?}"
             );
+            assert!(
+                parse(&src, Config::node_json_parse()).is_ok(),
+                "lenient config must accept {src:?}"
+            );
+        }
+
+        // Raw UTF-8 spellings, exercising the direct (non-escaped) code
+        // path in `string()` rather than `unicode_escape`.
+        for cp in ['\u{FDD0}', '\u{FFFE}', '\u{1FFFE}'] {
+            let src = format!("{{\"a\":\"{cp}\"}}");
+            assert!(
+                matches!(
+                    parse_strict(&src).unwrap_err(),
+                    JsonError::NonCharacter { .. }
+                ),
+                "expected NonCharacter for raw U+{:04X}",
+                cp as u32
+            );
+            assert!(
+                parse(&src, Config::node_json_parse()).is_ok(),
+                "lenient config must accept raw U+{:04X}",
+                cp as u32
+            );
+        }
+
+        // Surrogate-pair spellings that decode to a noncharacter.
+        for (esc, cp) in [
+            ("\\udbff\\udfff", 0x10_FFFFu32),
+            ("\\ud83f\\udffe", 0x1_FFFEu32),
+        ] {
+            let src = format!("{{\"a\":\"{esc}\"}}");
+            assert!(
+                matches!(
+                    parse_strict(&src).unwrap_err(),
+                    JsonError::NonCharacter { cp: found, .. } if found == cp
+                ),
+                "expected NonCharacter U+{cp:04X} for {src:?}"
+            );
+            assert!(
+                parse(&src, Config::node_json_parse()).is_ok(),
+                "lenient config must accept {src:?}"
+            );
+        }
+
+        // In a key, not only a value.
+        let key_src = "{\"\\ufdd0\":1}";
+        assert!(matches!(
+            parse_strict(key_src).unwrap_err(),
+            JsonError::NonCharacter { .. }
+        ));
+        assert!(parse(key_src, Config::node_json_parse()).is_ok());
+
+        // Negative controls, one below and one above the FDD0..=FDEF band:
+        // both must be accepted even by strict mode, or the rule above could
+        // be "reject anything near that range" and the tests would not
+        // notice.
+        for esc in ["\\ufdcf", "\\ufdf0"] {
+            let src = format!("{{\"a\":\"{esc}\"}}");
+            assert!(parse_strict(&src).is_ok(), "expected accept for {src:?}");
         }
     }
 
@@ -741,6 +873,21 @@ mod tests {
             Some(&Json::Number(Num::Float(9_007_199_254_740_992.0))),
             "IEEE-754 rounds it down"
         );
+
+        // A fractional or exponential *spelling* of the same out-of-range
+        // integer must not slip past strict mode just because it carries an
+        // extra `.0` or `e15` — that would let one extra character defeat
+        // the reference decoder this paper relies on.
+        for spelling in ["9007199254740993.0", "9.007199254740993e15"] {
+            let src = format!(r#"{{"n":{spelling}}}"#);
+            assert!(
+                matches!(
+                    parse(&src, Config::strict()).unwrap_err(),
+                    JsonError::NumberOutOfRange { .. }
+                ),
+                "expected NumberOutOfRange for {src:?}"
+            );
+        }
     }
 
     #[test]
@@ -766,9 +913,51 @@ mod tests {
 
     #[test]
     fn deep_nesting_is_an_error_not_a_stack_overflow() {
-        let src = format!("{}{}", "[".repeat(100_000), "]".repeat(100_000));
+        let arr = format!("{}{}", "[".repeat(100_000), "]".repeat(100_000));
         assert!(matches!(
-            parse_strict(&src).unwrap_err(),
+            parse_strict(&arr).unwrap_err(),
+            JsonError::TooDeep { .. }
+        ));
+        // Arrays and objects each have their own `enter`/`depth -= 1`
+        // bookkeeping; covering only one form leaves the other free to
+        // recurse straight into a stack overflow (SIGABRT, not a `Result`)
+        // on hostile input, which is exactly the failure this crate exists
+        // to turn into a diagnosable error.
+        let obj = r#"{"a":"#.repeat(100_000);
+        assert!(matches!(
+            parse_strict(&obj).unwrap_err(),
+            JsonError::TooDeep { .. }
+        ));
+    }
+
+    #[test]
+    fn max_depth_boundary_is_exactly_128() {
+        // Nothing else pins the *value* of `MAX_DEPTH`; a document one level
+        // under the limit must parse, and one level over must not, for both
+        // container kinds.
+        assert_eq!(MAX_DEPTH, 128);
+
+        let arr_at_limit = format!("{}{}", "[".repeat(128), "]".repeat(128));
+        assert!(
+            parse_strict(&arr_at_limit).is_ok(),
+            "an array nested 128 deep must parse"
+        );
+        let arr_over_limit = format!("{}{}", "[".repeat(129), "]".repeat(129));
+        assert!(matches!(
+            parse_strict(&arr_over_limit).unwrap_err(),
+            JsonError::TooDeep { .. }
+        ));
+
+        // 127 repeats of the opening wrapper plus one closed empty object
+        // nests to exactly depth 128; 128 repeats nests to 129.
+        let obj_at_limit = format!("{}{}{}", r#"{"a":"#.repeat(127), "{}", "}".repeat(127));
+        assert!(
+            parse_strict(&obj_at_limit).is_ok(),
+            "an object nested 128 deep must parse"
+        );
+        let obj_over_limit = format!("{}{}{}", r#"{"a":"#.repeat(128), "{}", "}".repeat(128));
+        assert!(matches!(
+            parse_strict(&obj_over_limit).unwrap_err(),
             JsonError::TooDeep { .. }
         ));
     }
@@ -790,6 +979,10 @@ mod tests {
             r#"{"a":1e}"#,
             "\"\u{1}\"",
             r#"{"a":tru}"#,
+            // RFC 8259 §7: `\u` takes exactly `4HEXDIG`, no sign and no
+            // stray whitespace in place of a digit.
+            r#"{"a":"\u+041"}"#,
+            r#"{"a":"\u 041"}"#,
         ] {
             assert!(parse_strict(bad).is_err(), "expected an error for {bad:?}");
         }
