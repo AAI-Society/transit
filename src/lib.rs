@@ -1,3 +1,4 @@
+pub mod decoder;
 pub mod jcs;
 pub mod json;
 
