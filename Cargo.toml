@@ -1,0 +1,36 @@
+[package]
+name = "transit"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.90"
+license = "Apache-2.0"
+description = "Test whether an endpoint satisfies the effect-binding conditions"
+repository = "https://github.com/Task-force-for-AI-agents-in-Healthcare/transit"
+
+[lib]
+name = "transit"
+path = "src/lib.rs"
+
+[[bin]]
+name = "transit"
+path = "src/bin/transit.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+clap = { version = "4", features = ["derive"] }
+thiserror = "2"
+anyhow = "1"
+tiny_http = "0.12"
+# Pinned to 2.x deliberately. ureq 3 shares none of the APIs this crate uses.
+ureq = "2"
+sha2 = "0.10"
+hex = "0.4"
+unicode-normalization = "0.1"
+# Ryu with ECMAScript Number::toString semantics. Not a convenience: Rust's
+# own float formatting breaks ties half-away-from-zero, and RFC 8785 §3.2.2.3
+# requires ECMA-262 §7.1.12.1 *including the "Note 2" enhancement*, which is
+# round-half-to-even. Hand-rolling the digits gets 0.216% of all doubles wrong
+# and every one of those changes the capability digest. See Task 2.
+ryu-js = "1"
