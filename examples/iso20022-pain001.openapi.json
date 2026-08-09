@@ -1,0 +1,38 @@
+{
+  "openapi": "3.0.3",
+  "info": { "title": "ISO 20022 pain.001 customer credit transfer initiation", "version": "1.0" },
+  "paths": {
+    "/pain.001": {
+      "post": {
+        "operationId": "customerCreditTransferInitiation",
+        "parameters": [
+          { "name": "Idempotency-Key", "in": "header", "required": true, "schema": { "type": "string" } },
+          { "name": "If-Match", "in": "header", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["EndToEndId", "Dbtr", "DbtrAcct", "Cdtr", "CdtrAcct", "InstdAmt", "Ccy", "ChrgBr", "ReqdExctnDt"],
+                "properties": {
+                  "EndToEndId": { "type": "string" },
+                  "Dbtr": { "type": "string" },
+                  "DbtrAcct": { "type": "string" },
+                  "Cdtr": { "type": "string" },
+                  "CdtrAcct": { "type": "string" },
+                  "InstdAmt": { "type": "string" },
+                  "Ccy": { "type": "string" },
+                  "ChrgBr": { "type": "string", "enum": ["DEBT", "CRED", "SHAR", "SLEV"] },
+                  "ReqdExctnDt": { "type": "string", "format": "date" }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

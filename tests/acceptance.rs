@@ -2,6 +2,7 @@
 //! claim the paper makes stops being true, not merely if the code stops
 //! compiling.
 
+use transit::classify::{classify_spec, ConditionVerdict, Verdict};
 use transit::corpus::{Condition, Evidence};
 use transit::differential;
 use transit::fuzz;
@@ -180,6 +181,69 @@ fn fuzz_reproduces_both_horns_of_the_retry_ambiguity() {
         .find(|o| o.branch == RetryBranch::FreshNonce)
         .unwrap();
     assert_eq!(fresh.orders_committed, 1);
+}
+
+fn classify_example(name: &str) -> transit::classify::Classification {
+    let src = std::fs::read_to_string(format!("examples/{name}")).expect("example present");
+    classify_spec(&src)
+        .expect("valid spec")
+        .into_iter()
+        .next()
+        .unwrap()
+}
+
+/// Acceptance test 4: `classify` on an ISO 20022 style spec returns
+/// `Qualified`; on a Slack `chat.postMessage` style spec it returns
+/// `Non-qualifying`, naming the specific conditions that failed.
+#[test]
+fn classify_separates_a_bindable_spec_from_an_unbindable_one() {
+    let iso = classify_example("iso20022-pain001.openapi.json");
+    assert_eq!(iso.verdict, Verdict::Qualified);
+    assert!(iso.failing.is_empty(), "{:?}", iso.failing);
+    for c in [Condition::C1, Condition::C2, Condition::C3, Condition::C4] {
+        assert_eq!(
+            iso.verdict_for(c),
+            Some(&ConditionVerdict::Satisfied),
+            "{c:?}"
+        );
+    }
+
+    let slack = classify_example("slack-chat-postmessage.openapi.json");
+    assert_eq!(slack.verdict, Verdict::NonQualifying);
+    // Naming the failing conditions is the requirement, not just the verdict.
+    assert!(
+        slack.failing.contains(&Condition::C1),
+        "{:?}",
+        slack.failing
+    );
+    assert!(
+        slack.failing.contains(&Condition::C2),
+        "{:?}",
+        slack.failing
+    );
+    assert!(
+        slack.failing.contains(&Condition::C3),
+        "{:?}",
+        slack.failing
+    );
+
+    // Every verdict here came from reading a document, and says so.
+    assert_eq!(iso.evidence, Evidence::SpecDerived);
+    assert_eq!(slack.evidence, Evidence::SpecDerived);
+}
+
+/// The middle of the taxonomy, and the S3 case, so the classifier is shown
+/// to distinguish three outcomes rather than two.
+#[test]
+fn classify_places_the_conditional_and_qualified_middle_cases() {
+    assert_eq!(
+        classify_example("stripe-charges.openapi.json").verdict,
+        Verdict::Conditional
+    );
+    assert_eq!(
+        classify_example("s3-put-if-match.openapi.json").verdict,
+        Verdict::Qualified
+    );
 }
 
 /// The observation format renders strings as UTF-16 code units, so an

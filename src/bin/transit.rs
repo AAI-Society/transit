@@ -47,6 +47,13 @@ enum Cmd {
         #[arg(long, default_value = "text")]
         format: Format,
     },
+    /// Classify an OpenAPI operation against C1-C4.
+    Classify {
+        #[arg(long)]
+        spec: PathBuf,
+        #[arg(long, default_value = "text")]
+        format: Format,
+    },
     /// Run the enforcing reverse proxy in front of an upstream API.
     Guard {
         #[arg(long)]
@@ -208,6 +215,32 @@ fn run() -> Result<ExitCode> {
             } else {
                 ExitCode::from(1)
             })
+        }
+        Cmd::Classify { spec, format } => {
+            let src = std::fs::read_to_string(&spec)
+                .with_context(|| format!("reading {}", spec.display()))?;
+            let cs = transit::classify::classify_spec(&src)?;
+            if format == Format::Json {
+                println!("{}", serde_json::to_string_pretty(&cs)?);
+            } else {
+                for c in &cs {
+                    println!("\n{} {} — {:?}", c.method, c.path, c.verdict);
+                    println!("  evidence: {}", c.evidence.caveat());
+                    for (cond, v) in &c.conditions {
+                        println!("    {:<32} {v:?}", cond.title());
+                    }
+                }
+            }
+            Ok(
+                if cs
+                    .iter()
+                    .any(|c| c.verdict == transit::classify::Verdict::NonQualifying)
+                {
+                    ExitCode::from(1)
+                } else {
+                    ExitCode::SUCCESS
+                },
+            )
         }
         Cmd::Guard { config } => {
             let cfg = transit::guard::load_config(&config)?;

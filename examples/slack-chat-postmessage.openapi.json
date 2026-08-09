@@ -1,0 +1,30 @@
+{
+  "openapi": "3.0.3",
+  "info": { "title": "Slack-style chat.postMessage", "version": "1.0" },
+  "paths": {
+    "/api/chat.postMessage": {
+      "post": {
+        "operationId": "chatPostMessage",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["channel"],
+                "properties": {
+                  "channel": { "type": "string", "description": "Channel ID or name, for example C123456 or #general." },
+                  "text": { "type": "string" },
+                  "parse": { "type": "string", "default": "none", "description": "When omitted, the workspace default applies." },
+                  "link_names": { "type": "boolean", "default": false },
+                  "unfurl_links": { "type": "boolean", "default": true },
+                  "username": { "type": "string" }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

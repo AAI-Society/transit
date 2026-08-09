@@ -1,3 +1,4 @@
+pub mod classify;
 pub mod corpus;
 pub mod decoder;
 pub mod differential;

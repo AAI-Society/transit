@@ -1,0 +1,36 @@
+{
+  "openapi": "3.0.3",
+  "info": { "title": "S3-style object PUT with If-Match", "version": "1.0" },
+  "paths": {
+    "/{bucket}/{key}": {
+      "parameters": [
+        { "name": "bucket", "in": "path", "required": true, "schema": { "type": "string", "pattern": "^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$" } },
+        { "name": "key", "in": "path", "required": true, "schema": { "type": "string", "pattern": "^[A-Za-z0-9!_.*'()/-]{1,1024}$" } }
+      ],
+      "put": {
+        "operationId": "putObject",
+        "parameters": [
+          { "name": "If-Match", "in": "header", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["content_base64", "content_type", "acl", "server_side_encryption"],
+                "properties": {
+                  "content_base64": { "type": "string" },
+                  "content_type": { "type": "string" },
+                  "acl": { "type": "string", "enum": ["private", "public-read"] },
+                  "server_side_encryption": { "type": "string", "enum": ["AES256", "aws:kms"] }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
