@@ -36,6 +36,11 @@ enum Cmd {
         #[arg(long, default_value = "127.0.0.1:8787")]
         addr: String,
     },
+    /// Run the enforcing reverse proxy in front of an upstream API.
+    Guard {
+        #[arg(long)]
+        config: PathBuf,
+    },
 }
 
 #[derive(Clone, Copy, PartialEq, clap::ValueEnum)]
@@ -119,6 +124,11 @@ fn run() -> Result<ExitCode> {
         Cmd::ServeHostile { scenario, addr } => {
             let modes = transit::hostile::FailureModes::named(&scenario)?;
             transit::hostile::serve(&addr, modes)?;
+            Ok(ExitCode::SUCCESS)
+        }
+        Cmd::Guard { config } => {
+            let cfg = transit::guard::load_config(&config)?;
+            transit::guard::serve(&cfg)?;
             Ok(ExitCode::SUCCESS)
         }
     }

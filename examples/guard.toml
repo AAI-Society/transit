@@ -1,0 +1,59 @@
+# transit guard — an enforcing reverse proxy.
+#
+# It strict-ingests every request before the upstream sees it, and forwards the
+# CANONICAL form rather than the wire form — so the upstream and whatever
+# signed the request cannot be looking at different spellings of one document.
+#
+# Fail closed. There is no permissive mode, and `strict_ingestion = false` is
+# refused at load rather than ignored.
+#
+# WHAT THIS DOES NOT DO. The guard cannot know what an endpoint defaults, so
+# C1 is enforced only where you name the parameters yourself, per route, in
+# `require_parameters` below. Point `transit classify` at the endpoint's
+# OpenAPI document to find out which parameters those are. Without that list,
+# a request omitting a field the endpoint fills from its own state is
+# forwarded, and the parameter-defaulting bypass still works.
+
+listen   = "127.0.0.1:8080"
+upstream = "http://127.0.0.1:8787"
+
+[enforce]
+# Always true. Present so a deployed config can be audited; setting it false
+# is an error, not a setting.
+strict_ingestion = true
+
+# Demand an Idempotency-Key on methods RFC 9110 does not define as idempotent
+# (POST, PATCH), so a network retry can be told from a replay.
+require_idempotency_key = true
+
+# Demand an If-Match precondition on every method that changes state
+# (POST, PUT, PATCH, DELETE).
+require_state_precondition = true
+
+# A body the guard cannot hold is one it cannot canonicalize.
+max_body_bytes = 1048576
+
+# Cap on what the upstream may send back. Without one, a large response
+# buffers into memory in full across every worker.
+max_response_bytes = 8388608
+
+# The canonical digest handed to the upstream. Any client-supplied header of
+# this name is stripped before ours is added.
+digest_header = "X-Transit-Digest"
+
+# C1, per route: the parameters this endpoint would otherwise fill from its
+# own state. A request omitting one is refused with 422 rather than completed
+# downstream by the server.
+[[route]]
+method = "POST"
+path_prefix = "/v1/transfer"
+require_parameters = ["to", "amount", "fee_tier"]
+
+# Read-only endpoints legitimately need neither a key nor a precondition.
+# Note there is no `strict_ingestion` key here: the rule the design rests on
+# is not route-configurable.
+[[route]]
+method = "POST"
+path_prefix = "/v1/search"
+require_idempotency_key = false
+require_state_precondition = false
