@@ -29,6 +29,13 @@ enum Cmd {
         #[arg(long)]
         fail_on_divergence: bool,
     },
+    /// Run the deliberately hostile endpoint. Local only.
+    ServeHostile {
+        #[arg(long, default_value = "all-hostile")]
+        scenario: String,
+        #[arg(long, default_value = "127.0.0.1:8787")]
+        addr: String,
+    },
 }
 
 #[derive(Clone, Copy, PartialEq, clap::ValueEnum)]
@@ -108,6 +115,11 @@ fn run() -> Result<ExitCode> {
             } else {
                 ExitCode::SUCCESS
             })
+        }
+        Cmd::ServeHostile { scenario, addr } => {
+            let modes = transit::hostile::FailureModes::named(&scenario)?;
+            transit::hostile::serve(&addr, modes)?;
+            Ok(ExitCode::SUCCESS)
         }
     }
 }
