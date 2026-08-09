@@ -95,8 +95,20 @@ pub enum NumberPolicy {
     /// Strict: reject anything outside the I-JSON interoperable range,
     /// anything that underflows, and negative zero.
     RejectOutOfRange,
-    /// Node and Go: every number becomes a double.
+    /// Node: every number becomes a double, silently overflowing to
+    /// +/-Infinity when a literal's magnitude exceeds a double's finite
+    /// range. Measured: `JSON.parse("1e400")` is `Infinity`, not an error.
     Ieee754Double,
+    /// Go `encoding/json`: every number becomes a double, but unlike Node a
+    /// literal that overflows a double's finite range is rejected rather
+    /// than silently becoming an infinity. This is a Task 4 correction: the
+    /// desk study modelled Go identically to Node here, and the real
+    /// `encoding/json.Unmarshal` disagreed on the first host measurement —
+    /// `json: cannot unmarshal number 1e400 into Go value of type float64`.
+    /// `encoding/json` surfaces `strconv.ParseFloat`'s `ErrRange` as an
+    /// `UnmarshalTypeError` instead of keeping the rounded-to-infinity
+    /// result the way Node, Python and Ruby all do.
+    Ieee754DoubleFinite,
     /// Python and Ruby: integer literals stay exact.
     ArbitraryPrecision,
 }
@@ -146,7 +158,9 @@ impl Config {
         Config {
             duplicates: DuplicatePolicy::LastWins,
             surrogates: SurrogatePolicy::Replace,
-            numbers: NumberPolicy::Ieee754Double,
+            // Ieee754DoubleFinite, not Ieee754Double: see the Task 4
+            // correction recorded on that variant.
+            numbers: NumberPolicy::Ieee754DoubleFinite,
             noncharacters: NoncharacterPolicy::Accept,
         }
     }
@@ -202,6 +216,11 @@ pub enum JsonError {
     NonCharacter { cp: u32, at: usize },
     #[error("number `{literal}` at byte {at} is outside the I-JSON interoperable range")]
     NumberOutOfRange { literal: String, at: usize },
+    #[error(
+        "number `{literal}` at byte {at} overflows the finite range of a 64-bit float; Go's \
+         encoding/json rejects it rather than silently producing an infinity"
+    )]
+    NumberOverflowsFloat64 { literal: String, at: usize },
     #[error("number `{literal}` at byte {at} underflows to zero")]
     NumberUnderflow { literal: String, at: usize },
     #[error("negative zero at byte {at} has no canonical form distinct from zero")]
@@ -590,6 +609,21 @@ impl<'a> P<'a> {
         match self.cfg.numbers {
             NumberPolicy::Ieee754Double => Ok(Json::Number(Num::Float(as_f64()?))),
 
+            // Task 4 correction, measured against the real `go` binary: a
+            // literal whose magnitude overflows a double's finite range is
+            // an error here, not a silent Infinity — see the variant's doc
+            // comment for the measured evidence.
+            NumberPolicy::Ieee754DoubleFinite => {
+                let f = as_f64()?;
+                if !f.is_finite() {
+                    return Err(JsonError::NumberOverflowsFloat64 {
+                        literal: lit.into(),
+                        at,
+                    });
+                }
+                Ok(Json::Number(Num::Float(f)))
+            }
+
             NumberPolicy::ArbitraryPrecision => {
                 if fractional {
                     return Ok(Json::Number(Num::Float(as_f64()?)));
@@ -899,6 +933,45 @@ mod tests {
                 "expected NumberOutOfRange for {src:?}"
             );
         }
+    }
+
+    #[test]
+    fn go_rejects_a_literal_that_overflows_a_double_but_node_does_not() {
+        // Task 4 correction: measured against the real `go` and `node`
+        // binaries. `strconv.ParseFloat` inside `encoding/json` treats an
+        // overflow to infinity as `ErrRange` and `encoding/json.Unmarshal`
+        // surfaces that as an error — `json: cannot unmarshal number 1e400
+        // into Go value of type float64` — while `JSON.parse("1e400")` in
+        // Node (and `json.loads` in Python, and `JSON.parse` in Ruby) all
+        // silently return `Infinity`. Before this fix, `Config::go_encoding_json`
+        // shared `NumberPolicy::Ieee754Double` with Node and so wrongly
+        // predicted `Infinity` for Go here too.
+        for src in [r#"{"n":1e400}"#, r#"{"n":-1e400}"#] {
+            assert!(
+                matches!(
+                    parse(src, Config::go_encoding_json()).unwrap_err(),
+                    JsonError::NumberOverflowsFloat64 { .. }
+                ),
+                "go must reject {src:?}"
+            );
+            assert!(
+                parse(src, Config::node_json_parse())
+                    .unwrap()
+                    .get("n")
+                    .is_some(),
+                "node must accept {src:?}"
+            );
+        }
+
+        // Right at the boundary: f64::MAX itself must still parse under
+        // Go's stricter policy, or the rule above could be "reject any
+        // large number" and this test would not notice.
+        let max = format!(r#"{{"n":{}}}"#, f64::MAX);
+        assert_eq!(
+            parse(&max, Config::go_encoding_json()).unwrap().get("n"),
+            Some(&Json::Number(Num::Float(f64::MAX))),
+            "f64::MAX itself is finite and must still parse"
+        );
     }
 
     #[test]
