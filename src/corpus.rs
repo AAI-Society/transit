@@ -112,8 +112,17 @@ pub fn cases() -> Vec<Case> {
                   resource resolver normalizes to the other",
         },
         Case {
+            // Fix round 1: the earlier payload duplicated `amount`, and
+            // every last-key-wins decoder actually installed on this host
+            // (node, python, ruby, go) resolves the member to plain `+0.0`
+            // before any decoder gets a chance to disagree about the sign
+            // -- the `-0.0` never survives to be observed at all, so the
+            // case was really a fourth duplicate-key case wearing this
+            // label. Only first-key-wins (Elixir, not installed here) would
+            // ever see it. A single-member payload puts `-0.0` where every
+            // decoder actually reads it.
             name: "negative-zero",
-            payload: r#"{"amount":-0.0,"amount":0.0}"#.to_string(),
+            payload: r#"{"amount":-0.0}"#.to_string(),
             condition: Condition::C2,
             why: "negative zero has no canonical form distinct from zero, so \
                   canonicalization is not injective over it",
@@ -122,8 +131,19 @@ pub fn cases() -> Vec<Case> {
             name: "underflow-1e-400",
             payload: r#"{"amount":1e-400,"floor":0}"#.to_string(),
             condition: Condition::C2,
-            why: "a non-zero amount the policy engine may read exactly and the \
-                  endpoint flushes to zero",
+            // Fix round 1: reworded. Every lenient config modelled here
+            // reads `1e-400` as exactly `0.0` -- `f64`'s parse underflows it
+            // the same way regardless of `NumberPolicy` -- so there is no
+            // numeric divergence between the lenient decoders to point to.
+            // The finding is narrower: strict mode is the only one of these
+            // configs that treats the underflow as an error at all, so a
+            // wire form that *looks* like a non-zero amount to a human
+            // auditor is silently accepted as zero by every production
+            // decoder and refused only by the one component built to catch
+            // it.
+            why: "every lenient decoder here silently reads this as exactly zero, so a \
+                  wire form that looks non-zero to a human auditor passes production \
+                  decoders unnoticed while strict mode is the one component that refuses it",
         },
         Case {
             name: "integer-beyond-2-53",
@@ -148,7 +168,7 @@ pub fn cases() -> Vec<Case> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::json::{parse, parse_strict, Config};
+    use crate::json::{parse, parse_strict, Config, Json, Num};
 
     #[test]
     fn every_case_is_syntactically_valid_json_that_strict_mode_still_refuses() {
@@ -225,6 +245,113 @@ mod tests {
             b.nfc().collect::<String>(),
             "and must mean the same account once normalized"
         );
+    }
+
+    #[test]
+    fn corpus_size_is_pinned() {
+        // `every_case_is_syntactically_valid_json_that_strict_mode_still_refuses`
+        // and the coverage test above both stay green if a filler case is
+        // appended alongside the eleven above -- neither one bounds the
+        // list from growing. Pin the count so a corpus that silently grows
+        // (or shrinks) without the `cases()` literal above changing is
+        // caught here.
+        assert_eq!(
+            cases().len(),
+            11,
+            "the corpus grew or shrank without the list above changing"
+        );
+    }
+
+    #[test]
+    fn negative_zero_case_actually_carries_a_negative_zero_to_every_decoder() {
+        // Fix round 1: the original payload duplicated `amount` (`-0.0`
+        // first, `0.0` second), so every last-key-wins decoder -- which is
+        // every decoder actually installed on this host -- resolved to
+        // plain `+0.0` before any decoder had a chance to observe the sign
+        // at all. The `-0.0` was discarded before the phenomenon the case
+        // is named for could occur, making it a duplicate-key case wearing
+        // a negative-zero label. Nothing above pins that the corrected
+        // single-member payload actually keeps the sign, so a regression
+        // back to the duplicated form would pass every other test in this
+        // module silently. Check it directly, under every modelled config,
+        // not only the ones happening to be installed here.
+        let c = case("negative-zero").unwrap();
+        for cfg in [
+            Config::node_json_parse(),
+            Config::go_encoding_json(),
+            Config::python_json(),
+            Config::ruby_json(),
+            Config::elixir_otp_json(),
+        ] {
+            let v = parse(&c.payload, cfg).unwrap();
+            let Some(Json::Number(Num::Float(f))) = v.get("amount") else {
+                panic!("expected a float `amount` under {cfg:?}")
+            };
+            assert_eq!(*f, 0.0, "must be zero under {cfg:?}");
+            assert!(
+                f.is_sign_negative(),
+                "the payload's negative sign must survive parsing under {cfg:?}, \
+                 not be discarded before any decoder observes it"
+            );
+        }
+    }
+
+    #[test]
+    fn the_measured_cases_pin_the_behaviour_they_were_measured_for() {
+        // Every other test in this module only asks "does some lenient
+        // decoder accept this and strict mode refuse it" -- a shape nearly
+        // any junk payload satisfies. Nothing above binds a case's *name*
+        // to its *payload*, so a payload substitution that keeps the
+        // accept/reject shape (e.g. swapping in a second duplicate-key
+        // payload, or the specific wrong `\ud800A` spelling the comment on
+        // `two-high-surrogates-collapse-into-one-character` warns against)
+        // passes every test above unnoticed. These two cases carry the
+        // entirety of Task 4's expensive measurement round, so pin the
+        // measured behaviour directly rather than trusting the name.
+        use crate::decoder::render;
+
+        let p = &case("two-high-surrogates-collapse-into-one-character")
+            .unwrap()
+            .payload;
+        assert!(
+            p.contains(r"\ud800\ud800"),
+            "must be two back-to-back high-surrogate escapes, not a raw \
+             character (`\\ud800A`) or anything else satisfying the weaker shape"
+        );
+        assert!(
+            render(&parse(p, Config::ruby_json()).unwrap()).contains("d800,dc00"),
+            "ruby folds the pair into the single character U+10000"
+        );
+        assert!(
+            render(&parse(p, Config::node_json_parse()).unwrap()).contains("d800,d800"),
+            "node keeps both high-surrogate code units distinct"
+        );
+
+        let n = &case("nan-literal").unwrap().payload;
+        assert!(
+            parse(n, Config::python_json()).is_ok(),
+            "python accepts the bare NaN token"
+        );
+        for c in [
+            Config::node_json_parse(),
+            Config::go_encoding_json(),
+            Config::ruby_json(),
+        ] {
+            assert!(
+                parse(n, c).is_err(),
+                "every other modelled runtime rejects it"
+            );
+        }
+    }
+
+    #[test]
+    fn condition_titles_are_pinned() {
+        // Destined for the paper's report output with no other caller and
+        // no other test; cheap to pin now rather than leave free to drift.
+        assert_eq!(Condition::C1.title(), "C1 parameter completeness");
+        assert_eq!(Condition::C2.title(), "C2 representation injectivity");
+        assert_eq!(Condition::C3.title(), "C3 strict idempotency");
+        assert_eq!(Condition::C4.title(), "C4 contextual state pinning");
     }
 
     #[test]
