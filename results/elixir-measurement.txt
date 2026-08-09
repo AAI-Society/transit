@@ -1,0 +1,74 @@
+Elixir OTP `:json` — measured, not modelled
+===========================================
+
+P02's canonical parser differential is Go last-key-wins against Elixir
+first-key-wins. No Elixir runtime exists on the development host, so that pair
+has been a *documentation claim* carried as `Config::elixir_otp_json()` and
+labelled `Unverified` everywhere it appears. This is the measurement.
+
+ENVIRONMENT
+-----------
+  elixir 1.17.3 / otp 27
+  decoder: Erlang/OTP `:json.decode/1` (not Jason, not Poison)
+  run:     Google Cloud Build, image `elixir:1.17-otp-27`
+  build:   7f80df15-ca22-42bb-8d4f-83d2e5592b6a
+  date:    2026-08-09
+
+A cross-language measurement is a property of an environment, so the
+environment is recorded with it. Re-running elsewhere may legitimately differ.
+
+OBSERVATIONS
+------------
+Format is transit's exact observation grammar (src/decoder.rs, Key::Exact):
+strings are UTF-16 code units, integers `I:`, doubles `F:<ieee-754 bits>`.
+
+  duplicate-key-recipient  OK {S:...amount=I:100,S:...to=S:...acct-1}
+  duplicate-key-amount     OK {S:...amount=I:1,S:...to=S:...acct-1}
+  lone-surrogate-high      ERR Erlang error: :unexpected_end
+  lone-surrogate-low       ERR Erlang error: {:unexpected_sequence, "\udc00"}
+  surrogate-pair           OK {S:0061=S:d83d,de00}
+  negative-zero            OK {S:...amount=F:8000000000000000}
+  underflow-1e-400         OK {S:...amount=F:0000000000000000,S:...floor=I:0}
+  integer-beyond-2-53      OK {S:...account_id=I:9007199254740993,...}
+  integer-1e21             OK {S:006e=I:1000000000000000000000}
+  noncharacter-fffe        OK {S:0061=S:fffe}
+  noncharacter-fdd0        OK {S:0061=S:fdd0}
+  overflow-1e400           ERR Erlang error: {:unexpected_sequence, "1.0e400"}
+  benign                   OK {S:...amount=I:100,S:...id=I:7}
+
+WHAT THE MODEL GOT RIGHT
+------------------------
+1. FIRST-KEY-WINS IS CONFIRMED. `{"to":"acct-1","amount":100,"to":"acct-9"}`
+   resolves `to` to `acct-1`. The paper's canonical Go/Elixir split is real and
+   is now measured rather than asserted. Go on the same payload yields
+   `acct-9`. One wire form, two recipients, both decoders content.
+2. Lone surrogates are rejected — and unlike Ruby 2.6, which accepts a lone
+   *low* surrogate while rejecting a lone high one, Elixir rejects both.
+3. Integers are kept exactly: 9007199254740993 and 10^21 both survive intact.
+4. Noncharacters are accepted, as every production decoder does.
+
+WHAT THE MODEL GOT WRONG
+------------------------
+5. OVERFLOW. Real `:json` REJECTS `1e400` (`{:unexpected_sequence,
+   "1.0e400"}`). `Config::elixir_otp_json()` uses `ArbitraryPrecision`, which
+   parses it to `f64::INFINITY` and accepts. The model must reject non-finite
+   results, the same correction Task 4 measured for Go.
+
+WHAT THE DESK STUDY GOT WRONG
+-----------------------------
+The decoder table in "Message to Effect Binding Research" makes two claims
+about Elixir that this measurement contradicts:
+
+6. It claims Elixir "Rejects negative zero token". It does not. `-0.0` is
+   accepted and the sign is preserved — `F:8000000000000000`, not
+   `F:0000000000000000`. Distinguishable from positive zero at the bit level.
+
+7. It claims magnitude-based digit rejection. `1e-400` is accepted and
+   underflows silently to `+0.0`. What is actually rejected is *overflow*
+   (finding 5), not underflow — the opposite end of the range from the one the
+   table describes.
+
+Both are documentation-derived claims about a runtime the desk study did not
+run. That is the same failure mode this tool exists to expose, appearing in
+the source material, and it is the second correction this build has pushed back
+into it after the survey's 4/7/13 split.
