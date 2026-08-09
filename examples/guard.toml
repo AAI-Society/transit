@@ -4,15 +4,29 @@
 # CANONICAL form rather than the wire form — so the upstream and whatever
 # signed the request cannot be looking at different spellings of one document.
 #
-# Fail closed. There is no permissive mode, and `strict_ingestion = false` is
-# refused at load rather than ignored.
+# Only `strict_ingestion` is non-negotiable — it is refused at load rather
+# than merely ignored, because it is the one rule this whole deployment
+# claim rests on. Nothing else here is: `require_idempotency_key` and
+# `require_state_precondition` both load and take effect when set to
+# `false`, globally or per route, and this config leaves both on. Read the
+# startup banner this proxy prints, not this comment, for what is actually
+# enforced in a running deployment.
 #
 # WHAT THIS DOES NOT DO. The guard cannot know what an endpoint defaults, so
 # C1 is enforced only where you name the parameters yourself, per route, in
 # `require_parameters` below. Point `transit classify` at the endpoint's
 # OpenAPI document to find out which parameters those are. Without that list,
 # a request omitting a field the endpoint fills from its own state is
-# forwarded, and the parameter-defaulting bypass still works.
+# forwarded, and the parameter-defaulting bypass still works. Each entry is
+# either a bare name (`"to"`, checked only for presence as a JSON string —
+# the default) or a table naming its type explicitly (`{ name = "amount",
+# type = "number" }`) for a parameter the endpoint reads some other way —
+# get the type wrong and a wrong-shaped value passes as though it were
+# absent, which is exactly the bypass this list exists to close. A name
+# matches only a literal top-level key: `require_parameters` cannot reach
+# into a nested object (`"a.b"` looks for a key literally spelled `a.b`, not
+# `b` inside `a`), so nest the fields you need to guard under a route of
+# their own, or require the whole containing object instead.
 
 listen   = "127.0.0.1:8080"
 upstream = "http://127.0.0.1:8787"
@@ -34,24 +48,37 @@ require_state_precondition = true
 max_body_bytes = 1048576
 
 # Cap on what the upstream may send back. Without one, a large response
-# buffers into memory in full across every worker.
+# buffers into memory in full across every in-flight request.
 max_response_bytes = 8388608
+
+# Cap on requests being handled at once. Past this many, a request is
+# refused with 503 immediately rather than given a thread — a thread per
+# request has no other upper bound, and an attacker who can hold enough
+# connections open with unfinished bodies can otherwise exhaust the
+# process's threads outright.
+max_concurrent_requests = 256
 
 # The canonical digest handed to the upstream. Any client-supplied header of
 # this name is stripped before ours is added.
 digest_header = "X-Transit-Digest"
 
 # C1, per route: the parameters this endpoint would otherwise fill from its
-# own state. A request omitting one is refused with 422 rather than completed
-# downstream by the server.
+# own state. A request omitting one, or supplying it as the wrong JSON type,
+# is refused with 422 rather than completed downstream by the server. The
+# shipped hostile endpoint reads `to` and `fee_tier` with a JSON-string
+# accessor and `amount` with a JSON-number one — `amount` must therefore name
+# its type, or an `amount` that is present but not a number (`false`, `[]`,
+# `"100"`) would satisfy the presence check here and still be read as absent
+# downstream.
 [[route]]
 method = "POST"
 path_prefix = "/v1/transfer"
-require_parameters = ["to", "amount", "fee_tier"]
+require_parameters = ["to", { name = "amount", type = "number" }, "fee_tier"]
 
-# Read-only endpoints legitimately need neither a key nor a precondition.
-# Note there is no `strict_ingestion` key here: the rule the design rests on
-# is not route-configurable.
+# This endpoint is read-only: it legitimately needs neither an Idempotency-Key
+# nor an If-Match precondition, even though it is a POST (a search body, not
+# a form of state change). Note there is no `strict_ingestion` key here: the
+# rule the design rests on is not route-configurable.
 [[route]]
 method = "POST"
 path_prefix = "/v1/search"
