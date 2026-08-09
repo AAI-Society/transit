@@ -705,18 +705,46 @@ pub fn parse_config(text: &str) -> Result<GuardConfig, GuardError> {
     Ok(cfg)
 }
 
+/// The two settings a container cannot put in its own config file.
+///
+/// A shipped image carries one `guard.toml`, and the two things that differ
+/// per deployment are the address it binds and the upstream it forwards to —
+/// `listen = "127.0.0.1:8080"` in particular is right on a workstation and
+/// unreachable inside a container, where a published port needs `0.0.0.0`.
+///
+/// Only these two. Nothing under `[enforce]` is overridable from the
+/// environment: an enforcement rule that can be turned off by an environment
+/// variable is one that can be turned off by anything that can set one, and
+/// `strict_ingestion` is already refused outright when a *config file* asks
+/// for it.
+///
+/// Takes a lookup rather than reading the environment itself, because process
+/// environment is global and cargo runs tests in threads — a test that set
+/// `TRANSIT_LISTEN` would be setting it for every other test running at that
+/// moment.
+pub fn apply_env_overrides(cfg: &mut GuardConfig, lookup: impl Fn(&str) -> Option<String>) {
+    if let Some(v) = lookup("TRANSIT_LISTEN") {
+        cfg.listen = v;
+    }
+    if let Some(v) = lookup("TRANSIT_UPSTREAM") {
+        cfg.upstream = v;
+    }
+}
+
 pub fn load_config(path: &Path) -> Result<GuardConfig, GuardError> {
     let text = std::fs::read_to_string(path).map_err(|source| GuardError::Io {
         path: path.display().to_string(),
         source,
     })?;
-    parse_config(&text).map_err(|e| match e {
+    let mut cfg = parse_config(&text).map_err(|e| match e {
         GuardError::Parse { source, .. } => GuardError::Parse {
             path: path.display().to_string(),
             source,
         },
         other => other,
-    })
+    })?;
+    apply_env_overrides(&mut cfg, |k| std::env::var(k).ok());
+    Ok(cfg)
 }
 
 /// A guard against a permit leaking: releases its slot whether `handle_one`
@@ -1059,6 +1087,46 @@ mod tests {
             enforce: Enforcement::default(),
             route: Vec::new(),
         }
+    }
+
+    #[test]
+    fn the_environment_overrides_the_two_settings_a_container_cannot_edit() {
+        let mut c = cfg();
+        apply_env_overrides(&mut c, |k| match k {
+            "TRANSIT_LISTEN" => Some("0.0.0.0:8080".into()),
+            "TRANSIT_UPSTREAM" => Some("http://upstream:8787".into()),
+            _ => None,
+        });
+        // The shipped config binds loopback, which is right on a workstation
+        // and unreachable inside a container behind a published port.
+        assert_eq!(c.listen, "0.0.0.0:8080");
+        assert_eq!(c.upstream, "http://upstream:8787");
+    }
+
+    #[test]
+    fn an_unset_environment_changes_nothing() {
+        let mut c = cfg();
+        let before = (c.listen.clone(), c.upstream.clone());
+        apply_env_overrides(&mut c, |_| None);
+        assert_eq!((c.listen.clone(), c.upstream.clone()), before);
+    }
+
+    #[test]
+    fn no_enforcement_rule_is_reachable_from_the_environment() {
+        // A rule an environment variable can switch off is a rule anything
+        // that can set one can switch off. `strict_ingestion` is already
+        // refused when a config file asks for it; this pins that the
+        // environment cannot ask at all.
+        let mut c = cfg();
+        c.enforce.require_idempotency_key = true;
+        apply_env_overrides(&mut c, |_| Some("false".into()));
+        assert!(c.enforce.strict_ingestion);
+        assert!(c.enforce.require_idempotency_key);
+        assert!(c.enforce.require_state_precondition);
+        // And the two that *are* overridable took the value, so the test
+        // above is not passing because the lookup went unused.
+        assert_eq!(c.listen, "false");
+        assert_eq!(c.upstream, "false");
     }
 
     fn req(method: &str, target: &str, body: &str, headers: &[(&str, &str)]) -> Request {

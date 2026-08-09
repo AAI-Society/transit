@@ -130,6 +130,22 @@ cargo run --example duplicate_key
 cargo run --example tie_break
 ```
 
+Or the whole argument in one command — the vulnerable endpoint, the guard in
+front of it, and the same payload sent at each:
+
+```bash
+docker compose up -d
+./scripts/demo.sh
+```
+
+Straight at the endpoint, the payload pays `acct-attacker`. Through the guard,
+it is refused with 400 and the upstream ledger shows one transfer: the
+unguarded one. The script asserts both halves and exits 1 if either fails —
+including if the attack stops working against the bare endpoint, since a
+demonstration that silently proves nothing is worse than none.
+[`docs/DEPLOYING.md`](docs/DEPLOYING.md) is the operator's guide, and it starts
+with what the guard does *not* do.
+
 Rust 2021, toolchain floor 1.90. No panics on malformed input — this crate eats
 hostile input by design, so that is a tested guarantee rather than an
 aspiration, asserted directly against deeply nested documents, truncated

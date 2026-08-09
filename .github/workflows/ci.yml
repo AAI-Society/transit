@@ -11,3 +11,16 @@ jobs:
       - run: cargo fmt --check
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test --all-targets
+
+  container:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t transit:ci .
+      - name: the demonstration must still demonstrate something
+        run: |
+          docker compose up -d
+          # No sleep: demo.sh waits for both to accept connections itself,
+          # because the distroless image has no shell for a healthcheck.
+          ./scripts/demo.sh
+          docker compose down

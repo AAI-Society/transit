@@ -1,0 +1,24 @@
+# The demonstration, in one command: the vulnerable upstream, and the guard
+# in front of it. `scripts/demo.sh` then sends one payload at each.
+#
+# The upstream's port is published deliberately. The whole argument is a
+# comparison, and it cannot be made without a way to reach the endpoint
+# directly. Nothing here is a deployment topology — a real one publishes the
+# guard and leaves the upstream reachable only from it.
+services:
+  upstream:
+    build: .
+    command: ["serve-hostile", "--scenario", "all-hostile", "--addr", "0.0.0.0:8787"]
+    ports: ["8787:8787"]
+
+  guard:
+    build: .
+    command: ["guard", "--config", "/etc/transit/guard.toml"]
+    environment:
+      # Both, not just the upstream. The shipped config binds
+      # `127.0.0.1:8080`, which inside a container is reachable only from
+      # that container — the published port below would connect to nothing.
+      TRANSIT_LISTEN: "0.0.0.0:8080"
+      TRANSIT_UPSTREAM: "http://upstream:8787"
+    ports: ["8080:8080"]
+    depends_on: [upstream]
