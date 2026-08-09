@@ -34,6 +34,15 @@ jobs:
             exit 1
           }
 
+  paper:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: WtfJoke/setup-tectonic@v3
+      # No `-Z shell-escape`: this preamble omits `minted`, so the build has
+      # no pygments dependency to satisfy here.
+      - run: cd paper && tectonic main.tex
+
   container:
     runs-on: ubuntu-latest
     steps:
