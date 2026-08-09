@@ -1,35 +1,30 @@
-<div align="center">
+<p align="center">
+  <img src="assets/banner.svg" alt="transit — signing the bytes is not signing the deed" width="100%">
+</p>
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.svg">
-  <source media="(prefers-color-scheme: light)" srcset="assets/logo-light.svg">
-  <img alt="transit" src="assets/logo-light.svg" width="440">
-</picture>
-
-**A signed capability binds the bytes of a request.<br>It does not bind what the endpoint does with them.**
-
-`transit` finds the gap between those two things, offline, with no credentials.
-
-<sub>
-  <img alt="Apache-2.0" src="https://img.shields.io/badge/licence-Apache--2.0-0A0A0A?style=flat-square">
-  <img alt="Rust 1.90+" src="https://img.shields.io/badge/rust-1.90%2B-0A0A0A?style=flat-square">
-  <img alt="status: in development" src="https://img.shields.io/badge/status-in%20development-7A9900?style=flat-square">
-  <img alt="no network" src="https://img.shields.io/badge/differential-zero%20network-CFFF04?style=flat-square&labelColor=0A0A0A">
-</sub>
-
-</div>
+<p align="center">
+  <img alt="Rust 2021" src="https://img.shields.io/badge/rust-2021%20%C2%B7%201.90%2B-CFFF04?style=flat-square&labelColor=0A0A0A">
+  <img alt="tests passing" src="https://img.shields.io/badge/tests-passing-CFFF04?style=flat-square&labelColor=0A0A0A">
+  <img alt="Apache 2.0" src="https://img.shields.io/badge/licence-Apache--2.0-CFFF04?style=flat-square&labelColor=0A0A0A">
+  <img alt="3 of 13 tasks" src="https://img.shields.io/badge/build-3%20of%2013%20tasks-8F8A82?style=flat-square&labelColor=0A0A0A">
+</p>
 
 ---
 
-## The bug, in one run
+## "The signature covers the request"
 
-RFC 8785 prohibits duplicate JSON object keys. Real decoders disagree about what to do
-anyway — Go and Node keep the **last**, Elixir keeps the **first**, Jackson varies by mode.
+It does. That is the problem.
+
+A signed capability binds a byte sequence. The security proofs for capability
+systems — macaroons, Biscuit, OAuth Rich Authorization Requests, token binding,
+every "signed intent" scheme in agent tooling — establish exactly that, and no
+more. The marketing says the endpoint performs the action that was approved.
+Those are different claims, and you can watch them come apart in about four
+seconds.
+
+RFC 8785 prohibits duplicate JSON object keys. Real decoders disagree about
+what to do anyway. Go and Node keep the **last**. Elixir keeps the **first**.
 None of them refuses.
-
-So an adversary sends one payload with two `to` keys. The policy engine authorizes a
-transfer to the legitimate recipient. The backend pays the attacker. The signature verifies
-over bytes both sides agree on.
 
 ```console
 $ cargo run --example duplicate_key
@@ -52,158 +47,219 @@ strict I-JSON ingestion refuses the payload outright:
   duplicate object key `to` at byte 32; RFC 8785 forbids duplicate keys
 ```
 
-**Every step is individually correct. The composition is exploitable.** That is precisely
-why message-level proofs miss it: there is no step to blame.
+The signature verifies. The nonce is fresh. Nobody replayed anything. **Every
+step is individually correct and the composition is exploitable**, which is
+exactly why message-level proofs miss it: there is no step to blame.
 
-That last line is also the fix, and it is the cheapest one in the whole field —
-reject non-canonical input *before* the signature is checked, not after.
+That last line is also the fix, and it is the cheapest one in the field —
+reject non-canonical input *before* verifying the signature, not after.
 
 ---
 
-## Why this exists
+## What transit does
 
-Capability systems, macaroons, Biscuit, OAuth Rich Authorization Requests, token binding,
-and every "signed intent" scheme in agent tooling share one hole. Their proofs establish
-**message authorization**: a signature covers a deterministic byte sequence. Their marketing
-describes **effect binding**: the endpoint performs the action that was approved.
-
-Those coincide only under conditions almost no production API meets. Real endpoints have
-parameter defaults, server-side state, redirects, retries, content negotiation, resource
-aliases, and concurrent requests that interact.
-
-`transit` is the conformance harness for the four conditions under which the two *do*
-coincide:
+You give it an endpoint — an OpenAPI document, or a live target you are
+authorized to probe. It reports whether binding a message to that endpoint
+binds an *effect*, against four separately checkable conditions:
 
 | | Condition | Fails when |
-|---|---|---|
+| :-- | :-- | :-- |
 | **C1** | Parameter completeness | the endpoint fills an omitted field from state the signature never covered |
 | **C2** | Representation injectivity | two wire forms with one digest induce different effects — parser differentials, URI aliases |
 | **C3** | Strict idempotency | the authorization nonce is conflated with the business idempotency key |
 | **C4** | Contextual state pinning | a concurrent mutation between check and use changes the effect instead of aborting |
 
-The conditions are **sufficient**. This project is careful not to claim they are necessary —
-an endpoint could achieve effect binding by other means, and the necessity direction has not
-been proved.
-
-Supporting tool for **P02 — From Message Authorization to Effect Binding**.
-
----
-
-## What is real and what is modelled
-
-This section leads, rather than hiding at the bottom, because a tool that tells you what an
-API does had better be exact about what it knows.
-
-**Real.** The strict I-JSON parser and the RFC 8785 canonicalizer are implemented here and
-tested against the specifications — including all 24 serializable vectors of RFC 8785
-Appendix B, which is what catches the round-half-to-even tie-break that Rust's own float
-formatting gets wrong for 0.216% of doubles. Divergences reported between language runtimes
-are *measured* on the host that ran them, by executing those runtimes.
-
-**Modelled.** Five decoder configurations model production decoders. Four (Go, Node, Python,
-Ruby) are cross-checked against the real runtime whenever it is installed, and a test fails
-if a model and its runtime disagree. **The Elixir model is not cross-checked** — no Elixir
-runtime is installed here, so its behaviour is a claim taken from documentation, and the tool
-labels it `Unverified` everywhere it appears. That label is *derived* from what runtime
-discovery actually found, never hard-coded: on a machine with none of them installed, every
-model reports itself unverified. A tool that claimed measurements it never made would be
-committing the exact error it exists to expose.
-
-**Hypothesis, not data.** A survey of 24 production endpoints classified against C1–C4 is a
-*documentation review*. Every row is tagged `DeskStudy`, no code path can promote a row to
-`LiveProbed` without an actual probe run, and the tool refuses to print the table without
-saying so.
-
-**Stricter than the RFCs, deliberately.** The strict configuration rejects integers outside
-±(2⁵³−1) even when they are exactly representable — so it refuses `1e20`, which RFC 7493 and
-RFC 8785 both permit. That is a fail-closed policy choice for an authorization pipeline, not
-a conformance requirement, and it is documented as such rather than dressed up as one.
-
-**A limit worth stating plainly.** Classifying an endpoint from its OpenAPI document is a
-claim about the *document*. C1 and C4 are properties of an implementation, and no
-specification reveals server-side defaulting. That is why `Unknown` is a first-class verdict
-and why every verdict carries its evidence tag.
+The conditions are **sufficient**. This project is careful not to claim they
+are necessary — an endpoint could achieve effect binding by other means, and
+that direction has not been proved. Getting this right is a small point of
+rigour a reviewer will absolutely test.
 
 ---
 
-## Status
+## Two results we did not expect
 
-Under active development, built task by task with a review gate on each. Three of thirteen
-tasks are merged.
+### The canonicalizer cannot be written the obvious way
 
-| | Component | State |
-|---|---|---|
-| ✅ | Parameterized JSON parser — strict I-JSON plus five decoder models | merged |
-| ✅ | RFC 8785 canonicalization and the capability digest | merged |
-| ✅ | Observation format and the in-crate decoders | merged |
-| ◻︎ | External host decoders, falsified against real runtimes | next |
-| ◻︎ | Adversarial corpus — duplicate keys, lone surrogates, NFC/NFD, negative zero, `1e-400`, integers past 2⁵³ | planned |
-| ◻︎ | `transit differential` — one payload, every decoder, zero network | planned |
-| ◻︎ | Hostile endpoint with individually toggleable failure modes | planned |
-| ◻︎ | `transit fuzz` — the defaulting bypass and the retry ambiguity | planned |
-| ◻︎ | `transit classify` — OpenAPI → C1–C4 → verdict | planned |
-| ◻︎ | `transit probe` — live probing, gated | planned |
-| ◻︎ | Results wiring, no-panic guarantee, the paper | planned |
-
-The commands below are the shipped design, not all shipped code. Anything not ticked above
-does not run yet, and this table is the authority.
+RFC 8785 says numbers serialize per ECMA-262 `Number::toString`. It also says
+*including the "Note 2" enhancement* — round half to even. Rust's own float
+formatting rounds half away from zero. Nobody notices, because the two agree
+almost always.
 
 ```console
-$ transit differential                      # every decoder, one payload. no network at all
-$ transit serve-hostile --scenario alias     # a server built to fail, locally
-$ transit fuzz --scenario default-injection  # reproduce the policy bypass
-$ transit classify --spec openapi.json       # C1–C4 verdict, naming what failed
-$ transit probe --live --config targets.toml --i-am-authorized
+$ cargo run --example tie_break
+
+one IEEE-754 double, bit pattern 43143ff3c1cb0959
+
+Rust's own float formatting   1424953923781206.3
+RFC 8785 Appendix B requires  1424953923781206.2
+                              ^ they disagree in the last digit
+
+digest over the canonical form   e1547479d27f057e3197d49417a1dcbe19dd8781b34fa9f83b789925943d00cb
+digest had we written it naively 38d2e996c847955502d2489bc8274bc3b07abf3fdb508bf169b098e4332b6f02
 ```
 
+**10,762 disagreements in 4,979,995 doubles — 0.216%.** Each one is a
+capability that verifies on one implementation and fails on another, over a
+value both sides parsed identically. The whole of RFC 8785 Appendix B is in the
+test suite; its last row exists for no other reason than this.
+
+### The survey we were handed does not add up
+
+The desk study behind this work classified 24 production endpoints against
+C1–C4 and reported the split as 4 qualified / 6 conditional / 14 non-qualifying.
+Transcribing its own table to assert those counts in code gives **4 / 7 / 13**.
+
+Square `POST /v2/payments` is classified conditional in the table, is missing
+from the 25% count, and is absorbed into the 58% one. The table's own example
+lists show it — six conditional examples against a claimed six, thirteen
+non-qualifying against a claimed fourteen. The rows were right; the arithmetic
+over them was not, and the corrected figure is now in the research note.
+
+Nothing was found by being clever. It was found because the survey loader
+asserts its counts against the transcribed rows, so a figure *cannot* drift
+from the data behind it.
+
 ---
+
+## Try it
+
+```bash
+git clone https://github.com/Task-force-for-AI-agents-in-Healthcare/transit
+cd transit
+cargo run --example duplicate_key
+cargo run --example tie_break
+```
+
+Rust 2021, toolchain floor 1.90. No panics on malformed input — this crate eats
+hostile input by design, so that is a tested guarantee rather than an
+aspiration, asserted directly against deeply nested documents, truncated
+escapes, lone surrogates and `i128::MIN`.
+
+## The five commands
+
+**Three of thirteen tasks are merged.** The library below runs today; the CLI
+does not yet. This table is the design, and the ticks are the authority.
+
+| | | |
+| :-- | :-- | :-- |
+| ✅ | *library* | strict I-JSON parser, RFC 8785 canonicalizer, five decoder models, the observation format |
+| ◻︎ | `differential` | one payload, every decoder on the host, **zero network at all** |
+| ◻︎ | `serve-hostile` | a server built to fail — five failure modes, each toggleable alone |
+| ◻︎ | `fuzz` | reproduce the defaulting bypass and both horns of the retry ambiguity |
+| ◻︎ | `classify` | OpenAPI → C1–C4 → Qualified / Conditional / Non-qualifying, naming what failed |
+| ◻︎ | `probe` | live probing, gated — see below |
+
+Everything except `probe` runs offline with no credentials, against a hostile
+endpoint that ships in the repository. The reproductions the paper rests on
+never touch a third party.
 
 ## Live probing is gated
 
-`transit probe` is the only command that can touch a third-party network, and it will not run
-unless **all** of the following hold:
+`probe` is the only command that can reach a third-party network, and it
+refuses unless **all** of the following hold: `--live` and `--i-am-authorized`
+are both given and each is checked separately; every target declares
+`authorization = "own-account"` or `"written-permission"`, with no default and
+no third value; every target declares a `contact` the probed party could use to
+tell you to stop; and the config parses with unknown fields rejected, so a
+misspelled key is a loud error rather than a setting that quietly is not there.
+Otherwise it exits **3** with an explanation. Rate-limited to 10 requests a
+minute by default.
 
-1. `--live` and `--i-am-authorized` are both given, and each is checked separately so a
-   missing flag is reported as itself.
-2. Every target declares `authorization = "own-account"` or `"written-permission"`. There is
-   no default and no third value.
-3. Every target declares a `contact` the probed party could use to tell you to stop.
-4. The config parses with unknown fields rejected, so a misspelled key is a loud error rather
-   than a setting that quietly is not there.
+`fuzz --target` is *not* gated, so it refuses any URL that is not loopback — it
+sends the same adversarial traffic, including a deliberate double execution,
+and labels its findings as coming from this repository's own hostile endpoint.
+That label would be a lie about a stranger's server.
 
-It refuses with exit code **3** and an explanation otherwise, and is rate-limited to 10
-requests a minute by default. `transit fuzz --target` is *not* gated, so it refuses any URL
-that is not loopback — it sends the same adversarial traffic, including a deliberate double
-execution, and labels its findings as coming from this repository's own hostile endpoint.
-
-This is defence in depth, not a guarantee. **The operator is responsible for what this
-command sends.** Every reproduction the paper relies on runs against the local hostile
-endpoint, offline and without credentials.
+Defence in depth, not a guarantee. **The operator is responsible for what this
+sends.**
 
 ---
 
-## Build
+## What is real, and what is not
 
-```console
-$ cargo test                          # 40 tests
-$ cargo clippy --all-targets -- -D warnings
-$ cargo run --example duplicate_key
-```
+This project is about not overclaiming, so:
 
-Rust 2021, toolchain floor 1.90. No panics on malformed input — this crate eats hostile input
-by design, so that is a tested guarantee rather than an aspiration.
+**Real.** The strict I-JSON parser and the RFC 8785 canonicalizer, tested
+against the specifications — including all 24 serializable vectors of Appendix
+B. Divergences reported between language runtimes are *measured*, by executing
+those runtimes on the host that ran them.
+
+**Modelled.** Five configurations model production decoders. Four (Go, Node,
+Python, Ruby) are cross-checked against the real runtime whenever it is
+installed, and a test fails if a model and its runtime disagree. **The Elixir
+model is not cross-checked** — no Elixir runtime is installed here, so its
+behaviour is a claim taken from documentation, and it is labelled `Unverified`
+everywhere it appears. That label is *derived* from what discovery actually
+found, never hard-coded: on a machine with none of them installed, every model
+reports itself unverified. A tool claiming measurements it never made would be
+committing the exact error it exists to expose.
+
+**Hypothesis, not data.** The 24-endpoint survey is a documentation review.
+Every row is tagged `DeskStudy`, no code path can promote a row to `LiveProbed`
+without an actual probe run, and the tool refuses to print the table without
+saying so.
+
+**Stricter than the RFCs, deliberately.** The strict configuration rejects
+integers outside ±(2⁵³−1) even when exactly representable, so it refuses `1e20`
+— which RFC 7493 and RFC 8785 both permit. §2.2's `SHOULD NOT` covers magnitude
+or precision *beyond* a double, and `1e20` is not that. Fail-closed is a
+defensible policy for an authorization pipeline; pretending the RFCs require it
+would not be.
+
+**The limit that matters.** Classifying an endpoint from its OpenAPI document
+is a claim about the *document*. C1 and C4 are properties of an implementation,
+and no specification reveals server-side defaulting. That is why `Unknown` is a
+first-class verdict, why every verdict carries an evidence tag, and why live
+probing — not classification — is what would turn this survey into evidence.
+**That probing has not been done.** If you take one thing from this repository,
+take that rather than the duplicate-key demo.
 
 ---
+
+## How this maps to the standard
+
+transit is a research tool for the
+[**Proof-of-Control Standard**](https://github.com/AAI-Society/ov-poc-standard).
+It contradicts three of its claims and supplies two things it is missing:
+
+| | Standard | |
+| :-- | :-- | :-- |
+| ⚠️ | **Theorem 1** — *execution fidelity*: an adversary cannot make a relying party perform an action other than the one evaluated | the proof binds the *message*. No snapshot-to-effect relation is ever defined. Holds only given C1–C4 |
+| ⚠️ | **C7.1.4** — three complete-mediation options presented as alternatives | they are not equally strong. Option (b), un-attested local normalization, cannot guarantee effect binding and should be demoted below (c) and (a) |
+| ⚠️ | **C7.1.5** — Tier 1–2 only, as the exception | it is the majority. 13 of 24 surveyed endpoints fail both idempotency and parameter completeness |
+| ◻︎ | **A parser mandate** — currently absent | authorization pipelines MUST use strict RFC 8785 ingestion, rejecting duplicate keys, lone surrogates and unbounded numerics *before* signature verification |
+| ◻︎ | **A named condition per claim** — conformance claims do not say what they rest on | every verdict names the specific condition that failed, so a verifier can tell which of C1–C4 is load-bearing |
+
+⚠️ is a contradiction; ◻︎ is a gap this tool is being built to fill and has not
+filled yet. The duplicate-key contradiction is demonstrated above and runs. The
+retry ambiguity and the survey split are argued from the research note, not yet
+reproduced by this tool — the hostile endpoint that would reproduce them is
+task seven of thirteen.
+
+## The paper
+
+**Not written yet.** *From Message Authorization to Effect Binding: Conditions,
+Counterexamples, and a Conformance Harness* is the last task in the plan, and
+the results sections will read generated LaTeX from `results/` rather than
+hand-typed numbers — CI regenerates them and fails on drift, so a figure in the
+paper cannot disagree with the code that produced it.
+
+Its sibling, [**A Trust Calculus for Attestation
+Tiers**](https://github.com/Task-force-for-AI-agents-in-Healthcare/parallax/blob/main/paper/main.pdf),
+is finished and shows the shape this one will take.
 
 ## Related
 
-Part of a three-tool programme, named for the observational-astronomy method each one uses:
+Three tools, named for the observational-astronomy method each one uses:
 
 - **[parallax](https://github.com/Task-force-for-AI-agents-in-Healthcare/parallax)** — depth from two viewpoints. Computes the residual trust set of an attestation deployment.
 - **transit** — infer a hidden body from what it does to passing light. This one.
-- **occultation** — one body deliberately hiding another. Measures what unlinkability costs.
+- **occultation** — one body deliberately hiding another. Measures what unlinkability costs at agent action rates.
 
 ## Licence
 
-Apache-2.0 throughout, code and paper alike. See [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE).
-Copyright Advanced AI Society and the Proof-of-Control contributors.
+Apache-2.0 throughout, code and paper alike. Built for the
+[Advanced AI Society](https://advancedaisociety.org) Proof-of-Control initiative —
+see [**AAI-Society/ov-poc-standard**](https://github.com/AAI-Society/ov-poc-standard).
+
+<p align="center"><img src="assets/logo.svg" width="52" alt=""></p>
