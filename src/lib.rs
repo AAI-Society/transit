@@ -1,3 +1,4 @@
+pub mod corpus;
 pub mod decoder;
 pub mod external;
 pub mod jcs;
