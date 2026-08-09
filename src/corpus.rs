@@ -165,6 +165,44 @@ pub fn cases() -> Vec<Case> {
     ]
 }
 
+/// How a fact was come by. Attached to every verdict and every finding,
+/// because the methodological crux of this whole paper is that a
+/// documentation-derived classification and a measurement are not the same
+/// kind of claim and must not print the same way.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Evidence {
+    /// Read out of an OpenAPI document. A claim about the document.
+    SpecDerived,
+    /// Measured against the hostile endpoint in this repository.
+    HostileServer,
+    /// Measured against a real endpoint, under the authorization gate.
+    LiveProbed,
+    /// Taken from the desk study's documentation review. **A hypothesis.**
+    DeskStudy,
+}
+
+impl Evidence {
+    /// One line, printed next to every result. Nobody reading output should
+    /// have to go and look this up.
+    pub fn caveat(&self) -> &'static str {
+        match self {
+            Evidence::SpecDerived => {
+                "derived from a specification; C1 and C4 are properties of an \
+                 implementation and no document reveals them"
+            }
+            Evidence::HostileServer => {
+                "measured against this repository's deliberately hostile endpoint"
+            }
+            Evidence::LiveProbed => "measured against a live endpoint",
+            Evidence::DeskStudy => {
+                "HYPOTHESIS from a documentation review, never measured; \
+                 verifying it is work this paper has not done"
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

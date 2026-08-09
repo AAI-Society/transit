@@ -6,6 +6,7 @@ pub mod guard;
 pub mod hostile;
 pub mod jcs;
 pub mod json;
+pub mod transport;
 
 pub use jcs::{canonicalize, digest, JcsError};
 pub use json::{parse, parse_strict, Config, Json, JsonError, Num};
