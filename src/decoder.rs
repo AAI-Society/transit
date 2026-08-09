@@ -11,7 +11,7 @@ use serde::Serialize;
 /// compiles and then fails at runtime with "cannot serialize tagged newtype
 /// variant". That would have killed every `--format json` path, and with it
 /// `results/` and the CI diff gate, at the first run.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 #[serde(tag = "outcome", rename_all = "snake_case")]
 pub enum Observation {
     Value { rendered: String },
@@ -107,12 +107,46 @@ pub fn render_with(v: &Json, key: Key) -> String {
         // rounded `…992` compare equal and delete the corpus's central
         // numeric finding.
         Json::Number(n) => match key {
-            Key::Material => match crate::jcs::es_number(n) {
-                Ok(s) => format!("N:{s}"),
-                // Unreachable through any parser configuration, since none
-                // produces a non-finite number; recorded rather than panicked.
-                Err(_) => "N:!non-finite".to_string(),
-            },
+            Key::Material => {
+                // `es_number` renders `Int` as exact decimal and `Float` via
+                // ECMAScript `Number::toString`, which switches to exponent
+                // notation at |x| >= 1e21. Below that cutoff the two forms
+                // already agree; at and above it, an `Int` that is bit-
+                // identical to some `Float` (e.g. 10^21 = 2^21*5^21, and
+                // 5^21 < 2^53) would otherwise render as exact decimal
+                // while the equal-valued double renders in exponent form —
+                // a pure formatting-convention split, indistinguishable in
+                // the output from a genuine precision-loss finding like
+                // `9007199254740993`, and one that would even split a
+                // single decoder against itself. So an `Int` that
+                // round-trips exactly through `f64` is rendered the way
+                // that same-valued double would be; an `Int` that does
+                // *not* round-trip (the actual 2^53 finding) keeps the
+                // exact-decimal path, so it still differs from the rounded
+                // double it was not equal to.
+                let as_float = match n {
+                    Num::Int(i) if (*i as f64) as i128 == *i => Some(Num::Float(*i as f64)),
+                    _ => None,
+                };
+                let target = as_float.as_ref().unwrap_or(n);
+                match crate::jcs::es_number(target) {
+                    Ok(s) => format!("N:{s}"),
+                    // Reachable: no `Config` in this crate rejects an
+                    // out-of-range exponent, so `parse("1e400", ..)` yields
+                    // `Float(INFINITY)`. Signed and kinded rather than one
+                    // shared sentinel, so `1e400` and `-1e400` — which
+                    // `render_exact` already tells apart — do not collapse
+                    // into one material key.
+                    Err(_) => match target {
+                        Num::Float(f) if f.is_nan() => "N:!nan".to_string(),
+                        Num::Float(f) if f.is_sign_negative() => "N:!-inf".to_string(),
+                        Num::Float(_) => "N:!inf".to_string(),
+                        // Unreachable — `es_number` never errors on `Int` —
+                        // but recorded rather than panicked.
+                        Num::Int(_) => "N:!non-finite".to_string(),
+                    },
+                }
+            }
             Key::Exact => match n {
                 Num::Int(i) => format!("I:{i}"),
                 Num::Float(f) => format!("F:{:016x}", f.to_bits()),
@@ -416,6 +450,65 @@ mod tests {
     }
 
     #[test]
+    fn an_exact_integer_past_the_exponent_cutoff_is_not_a_manufactured_divergence() {
+        // 10^21 = 2^21 * 5^21 and 5^21 < 2^53, so it is exactly
+        // representable as both an arbitrary-precision integer and an
+        // IEEE-754 double — no decoder has rounded anything. But
+        // `es_number` switches a `Float` to ECMAScript exponent notation at
+        // |x| >= 1e21 while an `Int` still renders as exact decimal, so
+        // naively keying an `Int` by its own decimal form would split this
+        // bit-identical value into two material keys — a pure
+        // formatting-convention divergence, indistinguishable in the output
+        // from the genuine 9007199254740993 finding this test's neighbour
+        // pins. It must not happen, in either direction: across decoders,
+        // and within one arbitrary-precision decoder comparing the integer
+        // and exponent spellings of the same value.
+        let payload = "1000000000000000000000";
+        assert_eq!(
+            render(&parse(payload, Config::python_json()).unwrap()),
+            render(&parse(payload, Config::node_json_parse()).unwrap()),
+            "python's exact 10^21 and node's double 10^21 are one value"
+        );
+        assert_eq!(
+            render(&parse(payload, Config::python_json()).unwrap()),
+            render(&parse("1e21", Config::python_json()).unwrap()),
+            "one arbitrary-precision decoder must not disagree with itself \
+             over the spelling of one value"
+        );
+        // And the whole in-crate set must agree, the same property
+        // `semantically_identical_inputs_compare_equal` checks for a benign
+        // small integer.
+        let body = format!(r#"{{"amount":{payload}}}"#);
+        let keys: std::collections::BTreeSet<String> = in_crate()
+            .iter()
+            .filter_map(|d| match d.observe(&body).observation {
+                Observation::Value { rendered } => Some(rendered),
+                Observation::Rejected => None,
+            })
+            .collect();
+        assert_eq!(keys.len(), 1, "every decoder agrees about 10^21: {keys:?}");
+    }
+
+    #[test]
+    fn signed_infinity_and_nan_are_distinct_material_keys() {
+        // No `Config` in this crate rejects an out-of-range exponent, so
+        // `1e400` parses to `Float(INFINITY)` under any of the lenient
+        // configs — this is reachable, not a theoretical case. `+Infinity`
+        // and `-Infinity` are different values (and `render_exact` already
+        // tells them apart via their bit patterns), so a single shared
+        // non-finite sentinel would wrongly make them compare equal
+        // materially.
+        let pos = render(&parse("1e400", Config::node_json_parse()).unwrap());
+        let neg = render(&parse("-1e400", Config::node_json_parse()).unwrap());
+        assert_ne!(
+            pos, neg,
+            "+Infinity and -Infinity must not collapse to one key"
+        );
+        assert!(pos.contains("inf") && !pos.contains('-'), "{pos}");
+        assert!(neg.contains("-inf"), "{neg}");
+    }
+
+    #[test]
     fn representation_is_recorded_even_where_meaning_agrees() {
         // Keyed by meaning they are equal; keyed exactly they are not, and
         // `differential` reports that as a representation difference rather
@@ -525,6 +618,20 @@ mod tests {
                 );
             }
         }
+        // The zero-arg entry point every other caller uses must be the same
+        // conservative default, not merely `in_crate_verified_against(&[])`
+        // under another name: nothing above pins `in_crate()` itself, so a
+        // mutation of its body (e.g. to hard-code some runtimes as present)
+        // would pass every other assertion in this file.
+        for d in in_crate() {
+            if let Provenance::Modelled { verification, .. } = &d.provenance {
+                assert!(
+                    matches!(verification, ModelVerification::Unverified { .. }),
+                    "{} claims verification via in_crate() with nothing installed",
+                    d.id
+                );
+            }
+        }
         // And with a runtime present, the model that names it flips — while
         // its neighbours do not.
         let ds = in_crate_verified_against(&["go".to_string()]);
@@ -588,6 +695,13 @@ mod tests {
             "-0.0",
             "[1,2,3.5,-0.0]",
             r#"{"b":2,"a":1,"nested":{"x":true,"y":null}}"#,
+            // An exact `Int` beside an equal-valued `Float` under different
+            // keys: `S:0061` ("a") sorts before `S:0062` ("b") by key, but
+            // their *values* (`N:100` for both) are equal, so a sort that
+            // depended on the value would put "b" first here without
+            // failing on any of the documents above. This is the sole
+            // killer of that mutation.
+            r#"{"a":100,"b":100.0}"#,
         ];
         for src in docs {
             let v = parse(src, Config::python_json()).unwrap();
