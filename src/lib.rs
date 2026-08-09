@@ -2,6 +2,7 @@ pub mod corpus;
 pub mod decoder;
 pub mod differential;
 pub mod external;
+pub mod fuzz;
 pub mod guard;
 pub mod hostile;
 pub mod jcs;

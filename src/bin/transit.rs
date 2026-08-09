@@ -36,6 +36,17 @@ enum Cmd {
         #[arg(long, default_value = "127.0.0.1:8787")]
         addr: String,
     },
+    /// Run the adversarial checks against a target. Defaults to the hostile
+    /// endpoint in this process, which needs no server and no credentials.
+    Fuzz {
+        /// A base URL. Omit to use the in-process hostile endpoint.
+        #[arg(long)]
+        target: Option<String>,
+        #[arg(long, default_value = "all-hostile")]
+        scenario: String,
+        #[arg(long, default_value = "text")]
+        format: Format,
+    },
     /// Run the enforcing reverse proxy in front of an upstream API.
     Guard {
         #[arg(long)]
@@ -125,6 +136,78 @@ fn run() -> Result<ExitCode> {
             let modes = transit::hostile::FailureModes::named(&scenario)?;
             transit::hostile::serve(&addr, modes)?;
             Ok(ExitCode::SUCCESS)
+        }
+        Cmd::Fuzz {
+            target,
+            scenario,
+            format,
+        } => {
+            let modes = transit::hostile::FailureModes::named(&scenario)?;
+            let report = match target {
+                None => {
+                    let mut t = transit::transport::InProcess::new(modes);
+                    transit::fuzz::run_all(&mut t, &scenario)?
+                }
+                Some(base) => {
+                    // `fuzz` has no authorization gate, and `run_all`
+                    // deliberately executes a non-idempotent operation twice.
+                    // Pointing it at a stranger would be both ungated and
+                    // mislabelled, since its findings are tagged
+                    // `HostileServer`. Refuse anything but loopback.
+                    if !transit::transport::is_loopback(&base) {
+                        eprintln!(
+                            "refusing: `fuzz --target` is ungated and sends adversarial \
+                             traffic, including a deliberate double execution, so it may \
+                             only point at a hostile endpoint you are running locally. \
+                             `{base}` is not loopback.\n\nTo test something real, use \
+                             `transit probe`, which requires a written authorization \
+                             declaration, a contact address, and --i-am-authorized."
+                        );
+                        return Ok(ExitCode::from(2));
+                    }
+                    let mut t = transit::transport::Http {
+                        base,
+                        evidence: transit::corpus::Evidence::HostileServer,
+                        limiter: transit::transport::RateLimiter::per_minute(600),
+                    };
+                    transit::fuzz::run_all(&mut t, &scenario)?
+                }
+            };
+            if format == Format::Json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                println!("target:   {}", report.target);
+                println!(
+                    "evidence: {:?} — {}",
+                    report.evidence,
+                    report.evidence.caveat()
+                );
+                println!("checks:   {}", report.checks_run.join(", "));
+                for f in &report.findings {
+                    println!("\n{} [{}]", f.title, f.condition.title());
+                    println!("  policy saw:   {}", f.policy_saw);
+                    println!("  endpoint did: {}", f.endpoint_did);
+                }
+                if report.findings.is_empty() {
+                    println!("\nno findings");
+                }
+                // The residual is the whole reason `FuzzReport` carries a
+                // second list. Printing findings alone would let a conforming
+                // endpoint render as "no findings" over the structural half
+                // of C3, which is the claim this tool exists to support, not
+                // one it may quietly drop in its default output format.
+                for f in &report.residual {
+                    println!("\nresidual — no endpoint change closes this");
+                    println!("{} [{}]", f.title, f.condition.title());
+                    println!("  policy saw:   {}", f.policy_saw);
+                    println!("  endpoint did: {}", f.endpoint_did);
+                }
+            }
+            Ok(if report.findings.is_empty() {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::from(1)
+            })
         }
         Cmd::Guard { config } => {
             let cfg = transit::guard::load_config(&config)?;

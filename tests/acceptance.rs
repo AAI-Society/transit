@@ -2,7 +2,12 @@
 //! claim the paper makes stops being true, not merely if the code stops
 //! compiling.
 
+use transit::corpus::{Condition, Evidence};
 use transit::differential;
+use transit::fuzz;
+use transit::fuzz::{ClientBelief, RetryBranch};
+use transit::hostile::FailureModes;
+use transit::transport::InProcess;
 
 /// Acceptance test 1: `differential` detects the duplicate-key divergence
 /// between two decoders present on the host.
@@ -109,6 +114,72 @@ fn differential_detects_the_duplicate_key_divergence() {
             );
         }
     }
+}
+
+/// Acceptance test 2: `fuzz` against the hostile server in its
+/// default-injection scenario reproduces the parameter-defaulting policy
+/// bypass — a payload the policy layer approves and the endpoint executes
+/// differently.
+#[test]
+fn fuzz_reproduces_the_parameter_defaulting_policy_bypass() {
+    let mut hostile = InProcess::new(FailureModes::named("default-injection").unwrap());
+    let f = fuzz::parameter_defaulting_bypass(&mut hostile)
+        .unwrap()
+        .expect("the bypass must reproduce");
+
+    assert_eq!(f.condition, Condition::C1);
+    assert_eq!(f.evidence, Evidence::HostileServer);
+    assert!(f.policy_saw.contains("no fee_tier"), "{}", f.policy_saw);
+    assert!(f.endpoint_did.contains("priority"), "{}", f.endpoint_did);
+
+    // The same request against an endpoint conforming to the Boundable
+    // Profile produces nothing. Without this half, the check could be
+    // reporting a constant and would still pass.
+    let mut boundable = InProcess::new(FailureModes::boundable());
+    assert!(
+        fuzz::parameter_defaulting_bypass(&mut boundable)
+            .unwrap()
+            .is_none(),
+        "the finding must be a property of the endpoint, not of the checker"
+    );
+}
+
+/// Acceptance test 3: `fuzz` against the non-idempotent scenario reproduces
+/// the retry ambiguity — one branch where the client believes the operation
+/// failed although state changed, one where it executes twice.
+#[test]
+fn fuzz_reproduces_both_horns_of_the_retry_ambiguity() {
+    let mut hostile = InProcess::new(FailureModes::named("retry-ambiguity").unwrap());
+    let outcomes = fuzz::retry_ambiguity(&mut hostile).unwrap();
+    assert_eq!(outcomes.len(), 2);
+
+    let same = outcomes
+        .iter()
+        .find(|o| o.branch == RetryBranch::SameNonce)
+        .unwrap();
+    assert_eq!(same.client_believes, ClientBelief::Failed);
+    assert_eq!(
+        same.orders_committed, 1,
+        "the state change happened regardless"
+    );
+
+    let fresh = outcomes
+        .iter()
+        .find(|o| o.branch == RetryBranch::FreshNonce)
+        .unwrap();
+    assert_eq!(fresh.client_believes, ClientBelief::Succeeded);
+    assert_eq!(fresh.orders_committed, 2, "the effect happened twice");
+
+    // Decoupling the business idempotency key from the authorization nonce
+    // is what closes the second horn. Asserting that here is what keeps this
+    // test a statement about C3 rather than about the mock.
+    let mut boundable = InProcess::new(FailureModes::boundable());
+    let fixed = fuzz::retry_ambiguity(&mut boundable).unwrap();
+    let fresh = fixed
+        .iter()
+        .find(|o| o.branch == RetryBranch::FreshNonce)
+        .unwrap();
+    assert_eq!(fresh.orders_committed, 1);
 }
 
 /// The observation format renders strings as UTF-16 code units, so an
