@@ -153,8 +153,8 @@ escapes, lone surrogates and `i128::MIN`.
 
 ## The six commands
 
-**Twelve of fifteen tasks are merged.** Every command below runs today. This
-table is the design, and the ticks are the authority.
+**All fifteen tasks are merged.** Every command below runs today. This table
+is the design, and the ticks are the authority.
 
 | | | |
 | :-- | :-- | :-- |
