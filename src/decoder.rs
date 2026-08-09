@@ -14,8 +14,22 @@ use serde::Serialize;
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 #[serde(tag = "outcome", rename_all = "snake_case")]
 pub enum Observation {
-    Value { rendered: String },
+    Value {
+        rendered: String,
+    },
     Rejected,
+    /// The decoder never got a chance to accept or refuse the payload: the
+    /// runtime itself failed to run (a bad spawn, output `differential`
+    /// could not parse, ...). Distinct from `Rejected` on purpose — fix
+    /// round 1, C1: a version of this crate once folded that case into
+    /// `Rejected`, so a runtime that merely crashed was reported as having
+    /// agreed with every other decoder that genuinely refused the payload,
+    /// silently inflating the tool's own agreement count.
+    /// `differential::classify` excludes `Unavailable` from every
+    /// comparison — it is an absence, not a data point about the payload —
+    /// so it can neither create nor hide a divergence on its own. See
+    /// `differential::observe_all`.
+    Unavailable,
 }
 
 /// Where a decoder's behaviour comes from, and therefore how much a reader
@@ -371,8 +385,19 @@ pub fn in_crate_verified_against(present: &[String]) -> Vec<InCrateDecoder> {
             Provenance::Modelled {
                 models: "Elixir OTP :json".to_string(),
                 verification: ModelVerification::Unverified {
+                    // Fix round 1 (M11): this used to say the behaviour "has
+                    // not been measured," full stop — false as of
+                    // `results/elixir-measurement.txt`, which measured
+                    // first-key-wins directly on elixir 1.17.3 / OTP 27 on
+                    // GCP. What is true, and the only thing this label may
+                    // claim, is that it was not measured *on this host* —
+                    // no Elixir runtime is installed here, so this crate has
+                    // no way to check the model against reality locally,
+                    // regardless of what was confirmed elsewhere.
                     why: "no Elixir runtime is installed on this host, so this behaviour \
-                          is taken from documentation and has not been measured"
+                          has not been measured on this host; see \
+                          `results/elixir-measurement.txt` for the GCP measurement \
+                          this model is otherwise based on"
                         .to_string(),
                 },
             },
@@ -445,7 +470,7 @@ mod tests {
             .filter_map(
                 |d| match d.observe(r#"{"amount":100,"id":7}"#).observation {
                     Observation::Value { rendered } => Some(rendered),
-                    Observation::Rejected => None,
+                    Observation::Rejected | Observation::Unavailable => None,
                 },
             )
             .collect();
@@ -501,7 +526,7 @@ mod tests {
             .iter()
             .filter_map(|d| match d.observe(&body).observation {
                 Observation::Value { rendered } => Some(rendered),
-                Observation::Rejected => None,
+                Observation::Rejected | Observation::Unavailable => None,
             })
             .collect();
         assert_eq!(keys.len(), 1, "every decoder agrees about 10^21: {keys:?}");

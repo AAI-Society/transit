@@ -36,12 +36,16 @@ fn differential_detects_the_duplicate_key_divergence() {
         "serde_json resolved the duplicate to the last key: {serde}"
     );
 
-    // The two facts above are both true of decoders written elsewhere, so
-    // they would survive this crate's own duplicate policies being swapped or
-    // deleted. Pin those directly: first-key-wins and last-key-wins must land
-    // in different classes, and the first-key class must hold the *first*
-    // recipient. (`model:elixir-otp-json` is a model, not a measurement — no
-    // Elixir runtime exists here, and the report labels it `Unverified`.)
+    // `strict-ijson` is not external at all — it *is* this crate's own
+    // `DuplicatePolicy::Reject` policy (`Config::strict()`) — so only the
+    // `serde_json` half of the pair above is genuinely independent of
+    // anything this crate decided. That pair alone says nothing about
+    // `DuplicatePolicy::FirstWins`/`LastWins`, the two policies this crate
+    // actually models. Pin those directly: first-key-wins and last-key-wins
+    // must land in different classes, and the first-key class must hold the
+    // *first* recipient. (`model:elixir-otp-json` is a model, not a
+    // measurement — no Elixir runtime exists here, and the report labels it
+    // `Unverified`.)
     let first = d
         .class_of("model:elixir-otp-json")
         .expect("the first-key model took part");
@@ -81,9 +85,28 @@ fn differential_detects_the_duplicate_key_divergence() {
     );
 
     // Any language runtime that is installed joins in; none is required.
-    for id in ["go", "node", "python", "ruby"] {
-        if let Some(cls) = d.class_of(id) {
-            assert!(!cls.is_empty(), "{id} reported an empty observation");
+    // Fix round 1, I10: the old form here (`if let Some(cls) = ...; assert!(!cls.is_empty())`)
+    // is skipped entirely when the runtime is absent, `class_of` can never
+    // return an empty string in the first place (a class only exists because
+    // some decoder produced it), and it used to pass even for a runtime that
+    // had crashed (pre-C1, a crash was misreported as `Rejected`, which is a
+    // perfectly non-empty class). Assert something real instead: when a
+    // runtime actually took part, it must land in the same class as the
+    // in-crate model that claims to model it.
+    for (runtime_id, model_id) in [
+        ("go", "model:go-encoding-json"),
+        ("node", "model:node-json-parse"),
+        ("python", "model:python-json"),
+        ("ruby", "model:ruby-json"),
+    ] {
+        if let Some(cls) = d.class_of(runtime_id) {
+            let model_cls = d.class_of(model_id).unwrap_or_else(|| {
+                panic!("{model_id} took no part despite {runtime_id} being present")
+            });
+            assert_eq!(
+                cls, model_cls,
+                "{runtime_id} disagreed with the model that claims to model it"
+            );
         }
     }
 }

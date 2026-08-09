@@ -67,7 +67,25 @@ fn run() -> Result<ExitCode> {
                     let src = std::fs::read_to_string(&p)
                         .with_context(|| format!("reading {}", p.display()))?;
                     let r = transit::differential::run_payload(&src);
-                    print_case(&r, format)?;
+                    // Fix round 1, I6: `--payload` used to run a materially
+                    // weaker differential on a host missing runtimes with
+                    // nothing in either format saying so — `run_payload`
+                    // returns a lone `CaseReport`, which has no field for
+                    // it, so this is fetched separately rather than added
+                    // there.
+                    let missing = transit::differential::missing();
+                    if format == Format::Json {
+                        let mut value = serde_json::to_value(&r)?;
+                        if let serde_json::Value::Object(map) = &mut value {
+                            map.insert("missing".to_string(), serde_json::to_value(&missing)?);
+                        }
+                        println!("{}", serde_json::to_string_pretty(&value)?);
+                    } else {
+                        for m in &missing {
+                            println!("not installed, so not measured: {m}");
+                        }
+                        print_case(&r, format)?;
+                    }
                     r.divergence.is_some()
                 }
                 None => {
@@ -104,12 +122,41 @@ fn print_case(c: &transit::differential::CaseReport, format: Format) -> Result<(
         println!("  {}", c.why);
     }
     match &c.divergence {
-        None => println!("  every decoder agreed"),
+        None => {
+            // Fix round 1, I8: "every decoder agreed" is what a genuine
+            // agreement on a value looks like, but `divergence` is also
+            // `None` when every decoder rejected the payload outright — in
+            // which case they agreed about nothing, and the previous
+            // wording claimed the opposite of what happened. Unavailable
+            // (crashed) decoders take no part in either reading, the same
+            // way `classify` excludes them from every comparison.
+            let considered: Vec<&transit::decoder::Observation> = c
+                .reports
+                .iter()
+                .map(|r| &r.observation)
+                .filter(|o| !matches!(o, transit::decoder::Observation::Unavailable))
+                .collect();
+            let all_rejected = !considered.is_empty()
+                && considered
+                    .iter()
+                    .all(|o| matches!(o, transit::decoder::Observation::Rejected));
+            if all_rejected {
+                println!("  every decoder agreed: REJECTED");
+            } else {
+                println!("  every decoder agreed");
+            }
+        }
         Some(d) => {
             println!("  {} distinct observations:", d.classes.len());
             for (obs, ids) in &d.classes {
-                let short: String = obs.chars().take(72).collect();
-                println!("    {:<40} {}", ids.join(", "), short);
+                // Fix round 1, I7: a 72-character prefix truncated the
+                // flagship duplicate-key finding — the two value classes for
+                // `duplicate-key-recipient` are 83 characters and first
+                // differ at index 81, so both printed an identical prefix
+                // with no ellipsis, and the demo (first-key-wins authorizes
+                // `acct-1`, last-key-wins pays `acct-9`) rendered as two
+                // indistinguishable lines. Print the observation in full.
+                println!("    {:<40} {}", ids.join(", "), obs);
             }
         }
     }
