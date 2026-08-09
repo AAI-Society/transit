@@ -135,19 +135,25 @@ hostile input by design, so that is a tested guarantee rather than an
 aspiration, asserted directly against deeply nested documents, truncated
 escapes, lone surrogates and `i128::MIN`.
 
-## The five commands
+## The six commands
 
-**Three of thirteen tasks are merged.** The library below runs today; the CLI
-does not yet. This table is the design, and the ticks are the authority.
+**Twelve of fifteen tasks are merged.** Every command below runs today. This
+table is the design, and the ticks are the authority.
 
 | | | |
 | :-- | :-- | :-- |
 | ✅ | *library* | strict I-JSON parser, RFC 8785 canonicalizer, five decoder models, the observation format |
-| ◻︎ | `differential` | one payload, every decoder on the host, **zero network at all** |
-| ◻︎ | `serve-hostile` | a server built to fail — five failure modes, each toggleable alone |
-| ◻︎ | `fuzz` | reproduce the defaulting bypass and both horns of the retry ambiguity |
-| ◻︎ | `classify` | OpenAPI → C1–C4 → Qualified / Conditional / Non-qualifying, naming what failed |
-| ◻︎ | `probe` | live probing, gated — see below |
+| ✅ | `differential` | one payload, every decoder on the host, **zero network at all** |
+| ✅ | `serve-hostile` | a server built to fail — five failure modes, each toggleable alone |
+| ✅ | `fuzz` | reproduce the defaulting bypass and both horns of the retry ambiguity |
+| ✅ | `classify` | OpenAPI → C1–C4 → Qualified / Conditional / Non-qualifying, naming what failed |
+| ✅ | `guard` | an enforcing reverse proxy that refuses what the conditions forbid |
+| ✅ | `probe` | live probing, gated — see below |
+
+`probe`'s gate and its transport are built and tested; the checks it runs are
+still the ones written for this repository's own routes, so against a real API
+it reports that the checks did not apply rather than that the endpoint is
+clean. Per-target route configuration is not built.
 
 Everything except `probe` runs offline with no credentials, against a hostile
 endpoint that ships in the repository. The reproductions the paper rests on

@@ -47,6 +47,20 @@ enum Cmd {
         #[arg(long, default_value = "text")]
         format: Format,
     },
+    /// Probe live endpoints. Gated: see `examples/targets.example.toml`.
+    Probe {
+        /// Required. Present so that no accidental invocation reaches the
+        /// network.
+        #[arg(long)]
+        live: bool,
+        #[arg(long)]
+        config: PathBuf,
+        /// Required. The gate refuses without it and explains why.
+        #[arg(long)]
+        i_am_authorized: bool,
+        #[arg(long, default_value = "text")]
+        format: Format,
+    },
     /// Classify an OpenAPI operation against C1-C4.
     Classify {
         #[arg(long)]
@@ -214,6 +228,51 @@ fn run() -> Result<ExitCode> {
                 ExitCode::SUCCESS
             } else {
                 ExitCode::from(1)
+            })
+        }
+        Cmd::Probe {
+            live,
+            config,
+            i_am_authorized,
+            format,
+        } => {
+            let targets = transit::probe::load_targets(&config)?;
+            if let Err(e) = transit::probe::gate(&targets, live, i_am_authorized) {
+                eprintln!("{e}");
+                // Exit code 3 is reserved for this and nothing else, so a
+                // caller can distinguish "refused" from "found something".
+                return Ok(ExitCode::from(3));
+            }
+            let mut any = false;
+            for t in &targets.target {
+                let report = transit::probe::probe(t)?;
+                any |= !report.findings.is_empty();
+                if format == Format::Json {
+                    println!("{}", serde_json::to_string_pretty(&report)?);
+                } else {
+                    println!("\n{} ({})", t.name, t.base_url);
+                    println!("  evidence: {}", report.evidence.caveat());
+                    // Without this line an empty `findings` reads as "clean"
+                    // when the truth is that none of the checks addressed a
+                    // route this target recognised — the exact confusion
+                    // `checks_applicable` exists to prevent, and the reason
+                    // `probe` spends a request establishing it.
+                    if !report.checks_applicable {
+                        println!(
+                            "  the checks did not apply: this target did not recognise the \
+                             routes they are built around, so anything below is the absence \
+                             of a measurement rather than a clean result"
+                        );
+                    }
+                    for f in &report.findings {
+                        println!("  {} [{}]", f.title, f.condition.title());
+                    }
+                }
+            }
+            Ok(if any {
+                ExitCode::from(1)
+            } else {
+                ExitCode::SUCCESS
             })
         }
         Cmd::Classify { spec, format } => {

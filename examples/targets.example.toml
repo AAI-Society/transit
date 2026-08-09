@@ -1,0 +1,21 @@
+# Copy this file, edit it, and keep your copy out of version control.
+#
+# `transit probe` sends adversarial traffic. It runs only when this file
+# declares, per target, that you are authorized — and only when you also
+# pass --i-am-authorized on the command line. Both are required. Neither is
+# a substitute for actually being authorized: the gate is defence in depth,
+# and the operator is responsible for what this command sends.
+
+[[target]]
+name = "my-own-sandbox"
+base_url = "https://sandbox.example.com"
+
+# One of "own-account" or "written-permission". There is no third value and
+# no default.
+authorization = "own-account"
+
+# An address the probed party can use to tell you to stop. Required.
+contact = "you@example.com"
+
+# Requests per minute. Defaults to 10 if omitted.
+rate_limit_per_minute = 6

@@ -2,6 +2,7 @@
 //! claim the paper makes stops being true, not merely if the code stops
 //! compiling.
 
+use std::process::Command;
 use transit::classify::{classify_spec, ConditionVerdict, Verdict};
 use transit::corpus::{Condition, Evidence};
 use transit::differential;
@@ -244,6 +245,69 @@ fn classify_places_the_conditional_and_qualified_middle_cases() {
         classify_example("s3-put-if-match.openapi.json").verdict,
         Verdict::Qualified
     );
+}
+
+/// Acceptance test 5: `probe` exits non-zero with an explanatory message
+/// when the authorization declaration is absent.
+///
+/// Driven through the real binary rather than through `gate` directly,
+/// because the requirement is about what the *command* does. A library
+/// function that refuses correctly while the CLI proceeds anyway would pass
+/// a unit test and fail the requirement.
+#[test]
+fn probe_refuses_and_exits_three_without_authorization() {
+    let bin = env!("CARGO_BIN_EXE_transit");
+    let cfg = "examples/targets.example.toml";
+
+    // No --i-am-authorized.
+    let out = Command::new(bin)
+        .args(["probe", "--live", "--config", cfg])
+        .output()
+        .expect("the binary runs");
+    assert_eq!(
+        out.status.code(),
+        Some(3),
+        "exit code 3 is reserved for refusal"
+    );
+    let msg = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        msg.contains("--i-am-authorized"),
+        "the refusal must explain itself: {msg}"
+    );
+    assert!(msg.contains("refusing to probe"), "{msg}");
+
+    // A config whose target omits the authorization declaration must not
+    // even parse, so the run stops before anything is sent.
+    let dir = std::env::temp_dir().join("transit-acceptance");
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("no-authorization.toml");
+    std::fs::write(
+        &path,
+        "[[target]]\nname = \"t\"\nbase_url = \"https://example.com\"\ncontact = \"a@b.c\"\n",
+    )
+    .unwrap();
+    let out = Command::new(bin)
+        .args(["probe", "--live", "--i-am-authorized", "--config"])
+        .arg(&path)
+        .output()
+        .expect("the binary runs");
+    let msg = String::from_utf8_lossy(&out.stderr);
+    // The design's requirement is a non-zero exit *with an explanatory
+    // message*, so assert the message, not just the code.
+    assert!(
+        matches!(out.status.code(), Some(2) | Some(3)),
+        "expected a refusal, got {:?}: {msg}",
+        out.status.code()
+    );
+    assert!(
+        msg.contains("authorization"),
+        "the refusal must name the field: {msg}"
+    );
+    assert!(msg.contains("no-authorization.toml"), "and the file: {msg}");
+    // Exit 2 rather than 3 here is deliberate and stricter than the gate: an
+    // undeclared target fails at parse time, before the gate is reached and
+    // before anything could possibly be sent. Code 3 stays reserved for a
+    // config that parsed and was then refused.
 }
 
 /// The observation format renders strings as UTF-16 code units, so an
