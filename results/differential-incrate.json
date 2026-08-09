@@ -1,0 +1,1535 @@
+{
+  "cases": [
+    {
+      "case": "duplicate-key-recipient",
+      "condition": "C2",
+      "why": "a first-key-wins policy engine authorizes acct-1 while a last-key-wins backend pays acct-9, over bytes both accept",
+      "reports": [
+        {
+          "id": "strict-ijson",
+          "provenance": {
+            "kind": "in_crate"
+          },
+          "observation": {
+            "outcome": "rejected"
+          },
+          "representation": null,
+          "detail": "duplicate object key `to` at byte 28; RFC 8785 forbids duplicate keys"
+        },
+        {
+          "id": "serde_json",
+          "provenance": {
+            "kind": "in_crate"
+          },
+          "observation": {
+            "outcome": "value",
+            "rendered": "{S:0061,006d,006f,0075,006e,0074=N:100,S:0074,006f=S:0061,0063,0063,0074,002d,0039}"
+          },
+          "representation": "{S:0061,006d,006f,0075,006e,0074=I:100,S:0074,006f=S:0061,0063,0063,0074,002d,0039}",
+          "detail": null
+        },
+        {
+          "id": "model:go-encoding-json",
+          "provenance": {
+            "kind": "modelled",
+            "models": "Go encoding/json",
+            "verification": {
+              "state": "unverified",
+              "why": "no go runtime was found on this host, so this model has not been measured"
+            }
+          },
+          "observation": {
+            "outcome": "value",
+            "rendered": "{S:0061,006d,006f,0075,006e,0074=N:100,S:0074,006f=S:0061,0063,0063,0074,002d,0039}"
+          },
+          "representation": "{S:0061,006d,006f,0075,006e,0074=F:4059000000000000,S:0074,006f=S:0061,0063,0063,0074,002d,0039}",
+          "detail": null
+        },
+        {
+          "id": "model:node-json-parse",
+          "provenance": {
+            "kind": "modelled",
+            "models": "Node JSON.parse",
+            "verification": {
+              "state": "unverified",
+              "why": "no node runtime was found on this host, so this model has not been measured"
+            }
+          },
+          "observation": {
+            "outcome": "value",
+            "rendered": "{S:0061,006d,006f,0075,006e,0074=N:100,S:0074,006f=S:0061,0063,0063,0074,002d,0039}"
+          },
+          "representation": "{S:0061,006d,006f,0075,006e,0074=F:4059000000000000,S:0074,006f=S:0061,0063,0063,0074,002d,0039}",
+          "detail": null
+        },
+        {
+          "id": "model:python-json",
+          "provenance": {
+            "kind": "modelled",
+            "models": "CPython json",
+            "verification": {
+              "state": "unverified",
+              "why": "no python runtime was found on this host, so this model has not been measured"
+            }
+          },
+          "observation": {
+            "outcome": "value",
+            "rendered": "{S:0061,006d,006f,0075,006e,0074=N:100,S:0074,006f=S:0061,0063,0063,0074,002d,0039}"
+          },
+          "representation": "{S:0061,006d,006f,0075,006e,0074=I:100,S:0074,006f=S:0061,0063,0063,0074,002d,0039}",
+          "detail": null
+        },
+        {
+          "id": "model:ruby-json",
+          "provenance": {
+            "kind": "modelled",
+            "models": "Ruby JSON",
+            "verification": {
+              "state": "unverified",
+              "why": "no ruby runtime was found on this host, so this model has not been measured"
+            }
+          },
+          "observation": {
+            "outcome": "value",
+            "rendered": "{S:0061,006d,006f,0075,006e,0074=N:100,S:0074,006f=S:0061,0063,0063,0074,002d,0039}"
+          },
+          "representation": "{S:0061,006d,006f,0075,006e,0074=I:100,S:0074,006f=S:0061,0063,0063,0074,002d,0039}",
+          "detail": null
+        },
+        {
+          "id": "model:elixir-otp-json",
+          "provenance": {
+            "kind": "modelled",
+            "models": "Elixir OTP :json",
+            "verification": {
+              "state": "unverified",
+              "why": "no Elixir runtime is installed on this host, so this behaviour has not been measured on this host; see `results/elixir-measurement.txt` for the GCP measurement this model is otherwise based on"
+            }
+          },
+          "observation": {
+            "outcome": "value",
+            "rendered": "{S:0061,006d,006f,0075,006e,0074=N:100,S:0074,006f=S:0061,0063,0063,0074,002d,0031}"
+          },
+          "representation": "{S:0061,006d,006f,0075,006e,0074=I:100,S:0074,006f=S:0061,0063,0063,0074,002d,0031}",
+          "detail": null
+        }
+      ],
+      "divergence": {
+        "classes": [
+          [
+            "REJECTED",
+            [
+              "strict-ijson"
+            ]
+          ],
+          [
+            "{S:0061,006d,006f,0075,006e,0074=N:100,S:0074,006f=S:0061,0063,0063,0074,002d,0031}",
+            [
+              "model:elixir-otp-json"
+            ]
+          ],
+          [
+            "{S:0061,006d,006f,0075,006e,0074=N:100,S:0074,006f=S:0061,0063,0063,0074,002d,0039}",
+            [
+              "serde_json",
+              "model:go-encoding-json",
+              "model:node-json-parse",
+              "model:python-json",
+              "model:ruby-json"
+            ]
+          ]
+        ],
+        "representation_classes": 4
+      }
+    },
+    {
+      "case": "duplicate-key-amount",
+      "condition": "C2",
+      "why": "the same split applied to the amount rather than the recipient",
+      "reports": [
+        {
+          "id": "strict-ijson",
+          "provenance": {
+            "kind": "in_crate"
+          },
+          "observation": {
+            "outcome": "rejected"
+          },
+          "representation": null,
+          "detail": "duplicate object key `amount` at byte 26; RFC 8785 forbids duplicate keys"
+        },
+        {
+          "id": "serde_json",
+          "provenance": {
+            "kind": "in_crate"
+          },
+          "observation": {
+            "outcome": "value",
+            "rendered": "{S:0061,006d,006f,0075,006e,0074=N:100000,S:0074,006f=S:0061,0063,0063,0074,002d,0031}"
+          },
+          "representation": "{S:0061,006d,006f,0075,006e,0074=I:100000,S:0074,006f=S:0061,0063,0063,0074,002d,0031}",
+          "detail": null
+        },
+        {
+          "id": "model:go-encoding-json",
+          "provenance": {
+            "kind": "modelled",
+            "models": "Go encoding/json",
+            "verification": {
+              "state": "unverified",
+              "why": "no go runtime was found on this host, so this model has not been measured"
+            }
+          },
+          "observation": {
+            "outcome": "value",
+            "rendered": "{S:0061,006d,006f,0075,006e,0074=N:100000,S:0074,006f=S:0061,0063,0063,0074,002d,0031}"
+          },
+          "representation": "{S:0061,006d,006f,0075,006e,0074=F:40f86a0000000000,S:0074,006f=S:0061,0063,0063,0074,002d,0031}",
+          "detail": null
+        },
+        {
+          "id": "model:node-json-parse",
+          "provenance": {
+            "kind": "modelled",
+            "models": "Node JSON.parse",
+            "verification": {
+              "state": "unverified",
+              "why": "no node runtime was found on this host, so this model has not been measured"
+            }
+          },
+          "observation": {
+            "outcome": "value",
+            "rendered": "{S:0061,006d,006f,0075,006e,0074=N:100000,S:0074,006f=S:0061,0063,0063,0074,002d,0031}"
+          },
+          "representation": "{S:0061,006d,006f,0075,006e,0074=F:40f86a0000000000,S:0074,006f=S:0061,0063,0063,0074,002d,0031}",
+          "detail": null
+        },
+        {
+          "id": "model:python-json",
+          "provenance": {
+            "kind": "modelled",
+            "models": "CPython json",
+            "verification": {
+              "state": "unverified",
+              "why": "no python runtime was found on this host, so this model has not been measured"
+            }
+          },
+          "observation": {
+            "outcome": "value",
+            "rendered": "{S:0061,006d,006f,0075,006e,0074=N:100000,S:0074,006f=S:0061,0063,0063,0074,002d,0031}"
+          },
+          "representation": "{S:0061,006d,006f,0075,006e,0074=I:100000,S:0074,006f=S:0061,0063,0063,0074,002d,0031}",
+          "detail": null
+        },
+        {
+          "id": "model:ruby-json",
+          "provenance": {
+            "kind": "modelled",
+            "models": "Ruby JSON",
+            "verification": {
+              "state": "unverified",
+              "why": "no ruby runtime was found on this host, so this model has not been measured"
+            }
+          },
+          "observation": {
+            "outcome": "value",
+            "rendered": "{S:0061,006d,006f,0075,006e,0074=N:100000,S:0074,006f=S:0061,0063,0063,0074,002d,0031}"
+          },
+          "representation": "{S:0061,006d,006f,0075,006e,0074=I:100000,S:0074,006f=S:0061,0063,0063,0074,002d,0031}",
+          "detail": null
+        },
+        {
+          "id": "model:elixir-otp-json",
+          "provenance": {
+            "kind": "modelled",
+            "models": "Elixir OTP :json",
+            "verification": {
+              "state": "unverified",
+              "why": "no Elixir runtime is installed on this host, so this behaviour has not been measured on this host; see `results/elixir-measurement.txt` for the GCP measurement this model is otherwise based on"
+            }
+          },
+          "observation": {
+            "outcome": "value",
+            "rendered": "{S:0061,006d,006f,0075,006e,0074=N:1,S:0074,006f=S:0061,0063,0063,0074,002d,0031}"
+          },
+          "representation": "{S:0061,006d,006f,0075,006e,0074=I:1,S:0074,006f=S:0061,0063,0063,0074,002d,0031}",
+          "detail": null
+        }
+      ],
+      "divergence": {
+        "classes": [
+          [
+            "REJECTED",
+            [
+              "strict-ijson"
+            ]
+          ],
+          [
+            "{S:0061,006d,006f,0075,006e,0074=N:1,S:0074,006f=S:0061,0063,0063,0074,002d,0031}",
+            [
+              "model:elixir-otp-json"
+            ]
+          ],
+          [
+            "{S:0061,006d,006f,0075,006e,0074=N:100000,S:0074,006f=S:0061,0063,0063,0074,002d,0031}",
+            [
+              "serde_json",
+              "model:go-encoding-json",
+              "model:node-json-parse",
+              "model:python-json",
+              "model:ruby-json"
+            ]
+          ]
+        ],
+        "representation_classes": 4
+      }
+    },
+    {
+      "case": "lone-surrogate-high",
+      "condition": "C2",
+      "why": "Go substitutes U+FFFD, Node and Python retain the unpaired unit, Ruby refuses; three different identifiers from one wire form",
+      "reports": [
+        {
+          "id": "strict-ijson",
+          "provenance": {
+            "kind": "in_crate"
+          },
+          "observation": {
+            "outcome": "rejected"
+          },
+          "representation": null,
+          "detail": "lone surrogate U+D800 at byte 14; RFC 7493 requires well-formed Unicode"
+        },
+        {
+          "id": "serde_json",
+          "provenance": {
+            "kind": "in_crate"
+          },
+          "observation": {
+            "outcome": "rejected"
+          },
+          "representation": null,
+          "detail": "unexpected end of hex escape at line 1 column 19"
+        },
+        {
+          "id": "model:go-encoding-json",
+          "provenance": {
+            "kind": "modelled",
+            "models": "Go encoding/json",
+            "verification": {
+              "state": "unverified",
+              "why": "no go runtime was found on this host, so this model has not been measured"
+            }
+          },
+          "observation": {
+            "outcome": "value",
+            "rendered": "{S:0074,006f=S:0061,0063,0063,0074,002d,fffd,002d,0039}"
+          },
+          "representation": "{S:0074,006f=S:0061,0063,0063,0074,002d,fffd,002d,0039}",
+          "detail": null
+        },
+        {
+          "id": "model:node-json-parse",
+          "provenance": {
+            "kind": "modelled",
+            "models": "Node JSON.parse",
+            "verification": {
+              "state": "unverified",
+              "why": "no node runtime was found on this host, so this model has not been measured"
+            }
+          },
+          "observation": {
+            "outcome": "value",
+            "rendered": "{S:0074,006f=S:0061,0063,0063,0074,002d,d800,002d,0039}"
+          },
+          "representation": "{S:0074,006f=S:0061,0063,0063,0074,002d,d800,002d,0039}",
+          "detail": null
+        },
+        {
+          "id": "model:python-json",
+          "provenance": {
+            "kind": "modelled",
+            "models": "CPython json",
+            "verification": {
+              "state": "unverified",
+              "why": "no python runtime was found on this host, so this model has not been measured"
+            }
+          },
+          "observation": {
+            "outcome": "value",
+            "rendered": "{S:0074,006f=S:0061,0063,0063,0074,002d,d800,002d,0039}"
+          },
+          "representation": "{S:0074,006f=S:0061,0063,0063,0074,002d,d800,002d,0039}",
+          "detail": null
+        },
+        {
+          "id": "model:ruby-json",
+          "provenance": {
+            "kind": "modelled",
+            "models": "Ruby JSON",
+            "verification": {
+              "state": "unverified",
+              "why": "no ruby runtime was found on this host, so this model has not been measured"
+            }
+          },
+          "observation": {
+            "outcome": "rejected"
+          },
+          "representation": null,
+          "detail": "lone surrogate U+D800 at byte 14; RFC 7493 requires well-formed Unicode"
+        },
+        {
+          "id": "model:elixir-otp-json",
+          "provenance": {
+            "kind": "modelled",
+            "models": "Elixir OTP :json",
+            "verification": {
+              "state": "unverified",
+              "why": "no Elixir runtime is installed on this host, so this behaviour has not been measured on this host; see `results/elixir-measurement.txt` for the GCP measurement this model is otherwise based on"
+            }
+          },
+          "observation": {
+            "outcome": "rejected"
+          },
+          "representation": null,
+          "detail": "lone surrogate U+D800 at byte 14; RFC 7493 requires well-formed Unicode"
+        }
+      ],
+      "divergence": {
+        "classes": [
+          [
+            "REJECTED",
+            [
+              "strict-ijson",
+              "serde_json",
+              "model:ruby-json",
+              "model:elixir-otp-json"
+            ]
+          ],
+          [
+            "{S:0074,006f=S:0061,0063,0063,0074,002d,d800,002d,0039}",
+            [
+              "model:node-json-parse",
+              "model:python-json"
+            ]
+          ],
+          [
+            "{S:0074,006f=S:0061,0063,0063,0074,002d,fffd,002d,0039}",
+            [
+              "model:go-encoding-json"
+            ]
+          ]
+        ],
+        "representation_classes": 3
+      }
+    },
+    {
+      "case": "lone-surrogate-low",
+      "condition": "C2",
+      "why": "an unpaired low surrogate, which some decoders treat differently from an unpaired high one",
+      "reports": [
+        {
+          "id": "strict-ijson",
+          "provenance": {
+            "kind": "in_crate"
+          },
+          "observation": {
+            "outcome": "rejected"
+          },
+          "representation": null,
+          "detail": "lone surrogate U+DC00 at byte 14; RFC 7493 requires well-formed Unicode"
+        },
+        {
+          "id": "serde_json",
+          "provenance": {
+            "kind": "in_crate"
+          },
+          "observation": {
+            "outcome": "rejected"
+          },
+          "representation": null,
+          "detail": "lone leading surrogate in hex escape at line 1 column 18"
+        },
+        {
+          "id": "model:go-encoding-json",
+          "provenance": {
+            "kind": "modelled",
+            "models": "Go encoding/json",
+            "verification": {
+              "state": "unverified",
+              "why": "no go runtime was found on this host, so this model has not been measured"
+            }
+          },
+          "observation": {
+            "outcome": "value",
+            "rendered": "{S:0074,006f=S:0061,0063,0063,0074,002d,fffd,002d,0039}"
+          },
+          "representation": "{S:0074,006f=S:0061,0063,0063,0074,002d,fffd,002d,0039}",
+          "detail": null
+        },
+        {
+          "id": "model:node-json-parse",
+          "provenance": {
+            "kind": "modelled",
+            "models": "Node JSON.parse",
+            "verification": {
+              "state": "unverified",
+              "why": "no node runtime was found on this host, so this model has not been measured"
+            }
+          },
+          "observation": {
+            "outcome": "value",
+            "rendered": "{S:0074,006f=S:0061,0063,0063,0074,002d,dc00,002d,0039}"
+          },
+          "representation": "{S:0074,006f=S:0061,0063,0063,0074,002d,dc00,002d,0039}",
+          "detail": null
+        },
+        {
+          "id": "model:python-json",
+          "provenance": {
+            "kind": "modelled",
+            "models": "CPython json",
+            "verification": {
+              "state": "unverified",
+              "why": "no python runtime was found on this host, so this model has not been measured"
+            }
+          },
+          "observation": {
+            "outcome": "value",
+            "rendered": "{S:0074,006f=S:0061,0063,0063,0074,002d,dc00,002d,0039}"
+          },
+          "representation": "{S:0074,006f=S:0061,0063,0063,0074,002d,dc00,002d,0039}",
+          "detail": null
+        },
+        {
+          "id": "model:ruby-json",
+          "provenance": {
+            "kind": "modelled",
+            "models": "Ruby JSON",
+            "verification": {
+              "state": "unverified",
+              "why": "no ruby runtime was found on this host, so this model has not been measured"
+            }
+          },
+          "observation": {
+            "outcome": "value",
+            "rendered": "{S:0074,006f=S:0061,0063,0063,0074,002d,dc00,002d,0039}"
+          },
+          "representation": "{S:0074,006f=S:0061,0063,0063,0074,002d,dc00,002d,0039}",
+          "detail": null
+        },
+        {
+          "id": "model:elixir-otp-json",
+          "provenance": {
+            "kind": "modelled",
+            "models": "Elixir OTP :json",
+            "verification": {
+              "state": "unverified",
+              "why": "no Elixir runtime is installed on this host, so this behaviour has not been measured on this host; see `results/elixir-measurement.txt` for the GCP measurement this model is otherwise based on"
+            }
+          },
+          "observation": {
+            "outcome": "rejected"
+          },
+          "representation": null,
+          "detail": "lone surrogate U+DC00 at byte 14; RFC 7493 requires well-formed Unicode"
+        }
+      ],
+      "divergence": {
+        "classes": [
+          [
+            "REJECTED",
+            [
+              "strict-ijson",
+              "serde_json",
+              "model:elixir-otp-json"
+            ]
+          ],
+          [
+            "{S:0074,006f=S:0061,0063,0063,0074,002d,dc00,002d,0039}",
+            [
+              "model:node-json-parse",
+              "model:python-json",
+              "model:ruby-json"
+            ]
+          ],
+          [
+            "{S:0074,006f=S:0061,0063,0063,0074,002d,fffd,002d,0039}",
+            [
+              "model:go-encoding-json"
+            ]
+          ]
+        ],
+        "representation_classes": 3
+      }
+    },
+    {
+      "case": "two-high-surrogates-collapse-into-one-character",
+      "condition": "C2",
+      "why": "Ruby folds `\\ud800\\ud800` into the single character U+10000 (bytes f0 90 80 80) while Node keeps both code units and strict ingestion refuses the payload — two escapes that are each invalid become one valid character, silently shortening the identifier being authorized",
+      "reports": [
+        {
+          "id": "strict-ijson",
+          "provenance": {
+            "kind": "in_crate"
+          },
+          "observation": {
+            "outcome": "rejected"
+          },
+          "representation": null,
+          "detail": "lone surrogate U+D800 at byte 14; RFC 7493 requires well-formed Unicode"
+        },
+        {
+          "id": "serde_json",
+          "provenance": {
+            "kind": "in_crate"
+          },
+          "observation": {
+            "outcome": "rejected"
+          },
+          "representation": null,
+          "detail": "lone leading surrogate in hex escape at line 1 column 24"
+        },
+        {
+          "id": "model:go-encoding-json",
+          "provenance": {
+            "kind": "modelled",
+            "models": "Go encoding/json",
+            "verification": {
+              "state": "unverified",
+              "why": "no go runtime was found on this host, so this model has not been measured"
+            }
+          },
+          "observation": {
+            "outcome": "value",
+            "rendered": "{S:0074,006f=S:0061,0063,0063,0074,002d,fffd,fffd,002d,0039}"
+          },
+          "representation": "{S:0074,006f=S:0061,0063,0063,0074,002d,fffd,fffd,002d,0039}",
+          "detail": null
+        },
+        {
+          "id": "model:node-json-parse",
+          "provenance": {
+            "kind": "modelled",
+            "models": "Node JSON.parse",
+            "verification": {
+              "state": "unverified",
+              "why": "no node runtime was found on this host, so this model has not been measured"
+            }
+          },
+          "observation": {
+            "outcome": "value",
+            "rendered": "{S:0074,006f=S:0061,0063,0063,0074,002d,d800,d800,002d,0039}"
+          },
+          "representation": "{S:0074,006f=S:0061,0063,0063,0074,002d,d800,d800,002d,0039}",
+          "detail": null
+        },
+        {
+          "id": "model:python-json",
+          "provenance": {
+            "kind": "modelled",
+            "models": "CPython json",
+            "verification": {
+              "state": "unverified",
+              "why": "no python runtime was found on this host, so this model has not been measured"
+            }
+          },
+          "observation": {
+            "outcome": "value",
+            "rendered": "{S:0074,006f=S:0061,0063,0063,0074,002d,d800,d800,002d,0039}"
+          },
+          "representation": "{S:0074,006f=S:0061,0063,0063,0074,002d,d800,d800,002d,0039}",
+          "detail": null
+        },
+        {
+          "id": "model:ruby-json",
+          "provenance": {
+            "kind": "modelled",
+            "models": "Ruby JSON",
+            "verification": {
+              "state": "unverified",
+              "why": "no ruby runtime was found on this host, so this model has not been measured"
+            }
+          },
+          "observation": {
+            "outcome": "value",
+            "rendered": "{S:0074,006f=S:0061,0063,0063,0074,002d,d800,dc00,002d,0039}"
+          },
+          "representation": "{S:0074,006f=S:0061,0063,0063,0074,002d,d800,dc00,002d,0039}",
+          "detail": null
+        },
+        {
+          "id": "model:elixir-otp-json",
+          "provenance": {
+            "kind": "modelled",
+            "models": "Elixir OTP :json",
+            "verification": {
+              "state": "unverified",
+              "why": "no Elixir runtime is installed on this host, so this behaviour has not been measured on this host; see `results/elixir-measurement.txt` for the GCP measurement this model is otherwise based on"
+            }
+          },
+          "observation": {
+            "outcome": "rejected"
+          },
+          "representation": null,
+          "detail": "lone surrogate U+D800 at byte 14; RFC 7493 requires well-formed Unicode"
+        }
+      ],
+      "divergence": {
+        "classes": [
+          [
+            "REJECTED",
+            [
+              "strict-ijson",
+              "serde_json",
+              "model:elixir-otp-json"
+            ]
+          ],
+          [
+            "{S:0074,006f=S:0061,0063,0063,0074,002d,d800,d800,002d,0039}",
+            [
+              "model:node-json-parse",
+              "model:python-json"
+            ]
+          ],
+          [
+            "{S:0074,006f=S:0061,0063,0063,0074,002d,d800,dc00,002d,0039}",
+            [
+              "model:ruby-json"
+            ]
+          ],
+          [
+            "{S:0074,006f=S:0061,0063,0063,0074,002d,fffd,fffd,002d,0039}",
+            [
+              "model:go-encoding-json"
+            ]
+          ]
+        ],
+        "representation_classes": 4
+      }
+    },
+    {
+      "case": "nan-literal",
+      "condition": "C2",
+      "why": "`NaN` is not a JSON token at all, but CPython's json.loads accepts it by default (allow_nan) while Go, Node and Ruby reject it — so a policy engine written in Python reads an amount its backend never sees",
+      "reports": [
+        {
+          "id": "strict-ijson",
+          "provenance": {
+            "kind": "in_crate"
+          },
+          "observation": {
+            "outcome": "rejected"
+          },
+          "representation": null,
+          "detail": "unexpected character at byte 10"
+        },
+        {
+          "id": "serde_json",
+          "provenance": {
+            "kind": "in_crate"
+          },
+          "observation": {
+            "outcome": "rejected"
+          },
+          "representation": null,
+          "detail": "expected value at line 1 column 11"
+        },
+        {
+          "id": "model:go-encoding-json",
+          "provenance": {
+            "kind": "modelled",
+            "models": "Go encoding/json",
+            "verification": {
+              "state": "unverified",
+              "why": "no go runtime was found on this host, so this model has not been measured"
+            }
+          },
+          "observation": {
+            "outcome": "rejected"
+          },
+          "representation": null,
+          "detail": "unexpected character at byte 10"
+        },
+        {
+          "id": "model:node-json-parse",
+          "provenance": {
+            "kind": "modelled",
+            "models": "Node JSON.parse",
+            "verification": {
+              "state": "unverified",
+              "why": "no node runtime was found on this host, so this model has not been measured"
+            }
+          },
+          "observation": {
+            "outcome": "rejected"
+          },
+          "representation": null,
+          "detail": "unexpected character at byte 10"
+        },
+        {
+          "id": "model:python-json",
+          "provenance": {
+            "kind": "modelled",
+            "models": "CPython json",
+            "verification": {
+              "state": "unverified",
+              "why": "no python runtime was found on this host, so this model has not been measured"
+            }
+          },
+          "observation": {
+            "outcome": "value",
+            "rendered": "{S:0061,006d,006f,0075,006e,0074=N:!nan}"
+          },
+          "representation": "{S:0061,006d,006f,0075,006e,0074=F:7ff8000000000000}",
+          "detail": null
+        },
+        {
+          "id": "model:ruby-json",
+          "provenance": {
+            "kind": "modelled",
+            "models": "Ruby JSON",
+            "verification": {
+              "state": "unverified",
+              "why": "no ruby runtime was found on this host, so this model has not been measured"
+            }
+          },
+          "observation": {
+            "outcome": "rejected"
+          },
+          "representation": null,
+          "detail": "unexpected character at byte 10"
+        },
+        {
+          "id": "model:elixir-otp-json",
+          "provenance": {
+            "kind": "modelled",
+            "models": "Elixir OTP :json",
+            "verification": {
+              "state": "unverified",
+              "why": "no Elixir runtime is installed on this host, so this behaviour has not been measured on this host; see `results/elixir-measurement.txt` for the GCP measurement this model is otherwise based on"
+            }
+          },
+          "observation": {
+            "outcome": "rejected"
+          },
+          "representation": null,
+          "detail": "unexpected character at byte 10"
+        }
+      ],
+      "divergence": {
+        "classes": [
+          [
+            "REJECTED",
+            [
+              "strict-ijson",
+              "serde_json",
+              "model:go-encoding-json",
+              "model:node-json-parse",
+              "model:ruby-json",
+              "model:elixir-otp-json"
+            ]
+          ],
+          [
+            "{S:0061,006d,006f,0075,006e,0074=N:!nan}",
+            [
+              "model:python-json"
+            ]
+          ]
+        ],
+        "representation_classes": 2
+      }
+    },
+    {
+      "case": "nfc-nfd-recipient",
+      "condition": "C2",
+      "why": "the signing engine hashes one normalization form while the resource resolver normalizes to the other",
+      "reports": [
+        {
+          "id": "strict-ijson",
+          "provenance": {
+            "kind": "in_crate"
+          },
+          "observation": {
+            "outcome": "rejected"
+          },
+          "representation": null,
+          "detail": "duplicate object key `to_nfc` at byte 46; RFC 8785 forbids duplicate keys"
+        },
+        {
+          "id": "serde_json",
+          "provenance": {
+            "kind": "in_crate"
+          },
+          "observation": {
+            "outcome": "value",
+            "rendered": "{S:0074,006f,005f,006e,0066,0063=S:0063,0061,0066,00e9,002d,0061,0063,0063,0074,S:0074,006f,005f,006e,0066,0064=S:0063,0061,0066,0065,0301,002d,0061,0063,0063,0074}"
+          },
+          "representation": "{S:0074,006f,005f,006e,0066,0063=S:0063,0061,0066,00e9,002d,0061,0063,0063,0074,S:0074,006f,005f,006e,0066,0064=S:0063,0061,0066,0065,0301,002d,0061,0063,0063,0074}",
+          "detail": null
+        },
+        {
+          "id": "model:go-encoding-json",
+          "provenance": {
+            "kind": "modelled",
+            "models": "Go encoding/json",
+            "verification": {
+              "state": "unverified",
+              "why": "no go runtime was found on this host, so this model has not been measured"
+            }
+          },
+          "observation": {
+            "outcome": "value",
+            "rendered": "{S:0074,006f,005f,006e,0066,0063=S:0063,0061,0066,00e9,002d,0061,0063,0063,0074,S:0074,006f,005f,006e,0066,0064=S:0063,0061,0066,0065,0301,002d,0061,0063,0063,0074}"
+          },
+          "representation": "{S:0074,006f,005f,006e,0066,0063=S:0063,0061,0066,00e9,002d,0061,0063,0063,0074,S:0074,006f,005f,006e,0066,0064=S:0063,0061,0066,0065,0301,002d,0061,0063,0063,0074}",
+          "detail": null
+        },
+        {
+          "id": "model:node-json-parse",
+          "provenance": {
+            "kind": "modelled",
+            "models": "Node JSON.parse",
+            "verification": {
+              "state": "unverified",
+              "why": "no node runtime was found on this host, so this model has not been measured"
+            }
+          },
+          "observation": {
+            "outcome": "value",
+            "rendered": "{S:0074,006f,005f,006e,0066,0063=S:0063,0061,0066,00e9,002d,0061,0063,0063,0074,S:0074,006f,005f,006e,0066,0064=S:0063,0061,0066,0065,0301,002d,0061,0063,0063,0074}"
+          },
+          "representation": "{S:0074,006f,005f,006e,0066,0063=S:0063,0061,0066,00e9,002d,0061,0063,0063,0074,S:0074,006f,005f,006e,0066,0064=S:0063,0061,0066,0065,0301,002d,0061,0063,0063,0074}",
+          "detail": null
+        },
+        {
+          "id": "model:python-json",
+          "provenance": {
+            "kind": "modelled",
+            "models": "CPython json",
+            "verification": {
+              "state": "unverified",
+              "why": "no python runtime was found on this host, so this model has not been measured"
+            }
+          },
+          "observation": {
+            "outcome": "value",
+            "rendered": "{S:0074,006f,005f,006e,0066,0063=S:0063,0061,0066,00e9,002d,0061,0063,0063,0074,S:0074,006f,005f,006e,0066,0064=S:0063,0061,0066,0065,0301,002d,0061,0063,0063,0074}"
+          },
+          "representation": "{S:0074,006f,005f,006e,0066,0063=S:0063,0061,0066,00e9,002d,0061,0063,0063,0074,S:0074,006f,005f,006e,0066,0064=S:0063,0061,0066,0065,0301,002d,0061,0063,0063,0074}",
+          "detail": null
+        },
+        {
+          "id": "model:ruby-json",
+          "provenance": {
+            "kind": "modelled",
+            "models": "Ruby JSON",
+            "verification": {
+              "state": "unverified",
+              "why": "no ruby runtime was found on this host, so this model has not been measured"
+            }
+          },
+          "observation": {
+            "outcome": "value",
+            "rendered": "{S:0074,006f,005f,006e,0066,0063=S:0063,0061,0066,00e9,002d,0061,0063,0063,0074,S:0074,006f,005f,006e,0066,0064=S:0063,0061,0066,0065,0301,002d,0061,0063,0063,0074}"
+          },
+          "representation": "{S:0074,006f,005f,006e,0066,0063=S:0063,0061,0066,00e9,002d,0061,0063,0063,0074,S:0074,006f,005f,006e,0066,0064=S:0063,0061,0066,0065,0301,002d,0061,0063,0063,0074}",
+          "detail": null
+        },
+        {
+          "id": "model:elixir-otp-json",
+          "provenance": {
+            "kind": "modelled",
+            "models": "Elixir OTP :json",
+            "verification": {
+              "state": "unverified",
+              "why": "no Elixir runtime is installed on this host, so this behaviour has not been measured on this host; see `results/elixir-measurement.txt` for the GCP measurement this model is otherwise based on"
+            }
+          },
+          "observation": {
+            "outcome": "value",
+            "rendered": "{S:0074,006f,005f,006e,0066,0063=S:0063,0061,0066,00e9,002d,0061,0063,0063,0074,S:0074,006f,005f,006e,0066,0064=S:0063,0061,0066,0065,0301,002d,0061,0063,0063,0074}"
+          },
+          "representation": "{S:0074,006f,005f,006e,0066,0063=S:0063,0061,0066,00e9,002d,0061,0063,0063,0074,S:0074,006f,005f,006e,0066,0064=S:0063,0061,0066,0065,0301,002d,0061,0063,0063,0074}",
+          "detail": null
+        }
+      ],
+      "divergence": {
+        "classes": [
+          [
+            "REJECTED",
+            [
+              "strict-ijson"
+            ]
+          ],
+          [
+            "{S:0074,006f,005f,006e,0066,0063=S:0063,0061,0066,00e9,002d,0061,0063,0063,0074,S:0074,006f,005f,006e,0066,0064=S:0063,0061,0066,0065,0301,002d,0061,0063,0063,0074}",
+            [
+              "serde_json",
+              "model:go-encoding-json",
+              "model:node-json-parse",
+              "model:python-json",
+              "model:ruby-json",
+              "model:elixir-otp-json"
+            ]
+          ]
+        ],
+        "representation_classes": 2
+      }
+    },
+    {
+      "case": "negative-zero",
+      "condition": "C2",
+      "why": "negative zero has no canonical form distinct from zero, so canonicalization is not injective over it",
+      "reports": [
+        {
+          "id": "strict-ijson",
+          "provenance": {
+            "kind": "in_crate"
+          },
+          "observation": {
+            "outcome": "rejected"
+          },
+          "representation": null,
+          "detail": "negative zero at byte 10 has no canonical form distinct from zero"
+        },
+        {
+          "id": "serde_json",
+          "provenance": {
+            "kind": "in_crate"
+          },
+          "observation": {
+            "outcome": "value",
+            "rendered": "{S:0061,006d,006f,0075,006e,0074=N:0}"
+          },
+          "representation": "{S:0061,006d,006f,0075,006e,0074=F:8000000000000000}",
+          "detail": null
+        },
+        {
+          "id": "model:go-encoding-json",
+          "provenance": {
+            "kind": "modelled",
+            "models": "Go encoding/json",
+            "verification": {
+              "state": "unverified",
+              "why": "no go runtime was found on this host, so this model has not been measured"
+            }
+          },
+          "observation": {
+            "outcome": "value",
+            "rendered": "{S:0061,006d,006f,0075,006e,0074=N:0}"
+          },
+          "representation": "{S:0061,006d,006f,0075,006e,0074=F:8000000000000000}",
+          "detail": null
+        },
+        {
+          "id": "model:node-json-parse",
+          "provenance": {
+            "kind": "modelled",
+            "models": "Node JSON.parse",
+            "verification": {
+              "state": "unverified",
+              "why": "no node runtime was found on this host, so this model has not been measured"
+            }
+          },
+          "observation": {
+            "outcome": "value",
+            "rendered": "{S:0061,006d,006f,0075,006e,0074=N:0}"
+          },
+          "representation": "{S:0061,006d,006f,0075,006e,0074=F:8000000000000000}",
+          "detail": null
+        },
+        {
+          "id": "model:python-json",
+          "provenance": {
+            "kind": "modelled",
+            "models": "CPython json",
+            "verification": {
+              "state": "unverified",
+              "why": "no python runtime was found on this host, so this model has not been measured"
+            }
+          },
+          "observation": {
+            "outcome": "value",
+            "rendered": "{S:0061,006d,006f,0075,006e,0074=N:0}"
+          },
+          "representation": "{S:0061,006d,006f,0075,006e,0074=F:8000000000000000}",
+          "detail": null
+        },
+        {
+          "id": "model:ruby-json",
+          "provenance": {
+            "kind": "modelled",
+            "models": "Ruby JSON",
+            "verification": {
+              "state": "unverified",
+              "why": "no ruby runtime was found on this host, so this model has not been measured"
+            }
+          },
+          "observation": {
+            "outcome": "value",
+            "rendered": "{S:0061,006d,006f,0075,006e,0074=N:0}"
+          },
+          "representation": "{S:0061,006d,006f,0075,006e,0074=F:8000000000000000}",
+          "detail": null
+        },
+        {
+          "id": "model:elixir-otp-json",
+          "provenance": {
+            "kind": "modelled",
+            "models": "Elixir OTP :json",
+            "verification": {
+              "state": "unverified",
+              "why": "no Elixir runtime is installed on this host, so this behaviour has not been measured on this host; see `results/elixir-measurement.txt` for the GCP measurement this model is otherwise based on"
+            }
+          },
+          "observation": {
+            "outcome": "value",
+            "rendered": "{S:0061,006d,006f,0075,006e,0074=N:0}"
+          },
+          "representation": "{S:0061,006d,006f,0075,006e,0074=F:8000000000000000}",
+          "detail": null
+        }
+      ],
+      "divergence": {
+        "classes": [
+          [
+            "REJECTED",
+            [
+              "strict-ijson"
+            ]
+          ],
+          [
+            "{S:0061,006d,006f,0075,006e,0074=N:0}",
+            [
+              "serde_json",
+              "model:go-encoding-json",
+              "model:node-json-parse",
+              "model:python-json",
+              "model:ruby-json",
+              "model:elixir-otp-json"
+            ]
+          ]
+        ],
+        "representation_classes": 2
+      }
+    },
+    {
+      "case": "underflow-1e-400",
+      "condition": "C2",
+      "why": "every lenient decoder here silently reads this as exactly zero, so a wire form that looks non-zero to a human auditor passes production decoders unnoticed while strict mode is the one component that refuses it",
+      "reports": [
+        {
+          "id": "strict-ijson",
+          "provenance": {
+            "kind": "in_crate"
+          },
+          "observation": {
+            "outcome": "rejected"
+          },
+          "representation": null,
+          "detail": "number `1e-400` at byte 10 underflows to zero"
+        },
+        {
+          "id": "serde_json",
+          "provenance": {
+            "kind": "in_crate"
+          },
+          "observation": {
+            "outcome": "value",
+            "rendered": "{S:0061,006d,006f,0075,006e,0074=N:0,S:0066,006c,006f,006f,0072=N:0}"
+          },
+          "representation": "{S:0061,006d,006f,0075,006e,0074=F:0000000000000000,S:0066,006c,006f,006f,0072=I:0}",
+          "detail": null
+        },
+        {
+          "id": "model:go-encoding-json",
+          "provenance": {
+            "kind": "modelled",
+            "models": "Go encoding/json",
+            "verification": {
+              "state": "unverified",
+              "why": "no go runtime was found on this host, so this model has not been measured"
+            }
+          },
+          "observation": {
+            "outcome": "value",
+            "rendered": "{S:0061,006d,006f,0075,006e,0074=N:0,S:0066,006c,006f,006f,0072=N:0}"
+          },
+          "representation": "{S:0061,006d,006f,0075,006e,0074=F:0000000000000000,S:0066,006c,006f,006f,0072=F:0000000000000000}",
+          "detail": null
+        },
+        {
+          "id": "model:node-json-parse",
+          "provenance": {
+            "kind": "modelled",
+            "models": "Node JSON.parse",
+            "verification": {
+              "state": "unverified",
+              "why": "no node runtime was found on this host, so this model has not been measured"
+            }
+          },
+          "observation": {
+            "outcome": "value",
+            "rendered": "{S:0061,006d,006f,0075,006e,0074=N:0,S:0066,006c,006f,006f,0072=N:0}"
+          },
+          "representation": "{S:0061,006d,006f,0075,006e,0074=F:0000000000000000,S:0066,006c,006f,006f,0072=F:0000000000000000}",
+          "detail": null
+        },
+        {
+          "id": "model:python-json",
+          "provenance": {
+            "kind": "modelled",
+            "models": "CPython json",
+            "verification": {
+              "state": "unverified",
+              "why": "no python runtime was found on this host, so this model has not been measured"
+            }
+          },
+          "observation": {
+            "outcome": "value",
+            "rendered": "{S:0061,006d,006f,0075,006e,0074=N:0,S:0066,006c,006f,006f,0072=N:0}"
+          },
+          "representation": "{S:0061,006d,006f,0075,006e,0074=F:0000000000000000,S:0066,006c,006f,006f,0072=I:0}",
+          "detail": null
+        },
+        {
+          "id": "model:ruby-json",
+          "provenance": {
+            "kind": "modelled",
+            "models": "Ruby JSON",
+            "verification": {
+              "state": "unverified",
+              "why": "no ruby runtime was found on this host, so this model has not been measured"
+            }
+          },
+          "observation": {
+            "outcome": "value",
+            "rendered": "{S:0061,006d,006f,0075,006e,0074=N:0,S:0066,006c,006f,006f,0072=N:0}"
+          },
+          "representation": "{S:0061,006d,006f,0075,006e,0074=F:0000000000000000,S:0066,006c,006f,006f,0072=I:0}",
+          "detail": null
+        },
+        {
+          "id": "model:elixir-otp-json",
+          "provenance": {
+            "kind": "modelled",
+            "models": "Elixir OTP :json",
+            "verification": {
+              "state": "unverified",
+              "why": "no Elixir runtime is installed on this host, so this behaviour has not been measured on this host; see `results/elixir-measurement.txt` for the GCP measurement this model is otherwise based on"
+            }
+          },
+          "observation": {
+            "outcome": "value",
+            "rendered": "{S:0061,006d,006f,0075,006e,0074=N:0,S:0066,006c,006f,006f,0072=N:0}"
+          },
+          "representation": "{S:0061,006d,006f,0075,006e,0074=F:0000000000000000,S:0066,006c,006f,006f,0072=I:0}",
+          "detail": null
+        }
+      ],
+      "divergence": {
+        "classes": [
+          [
+            "REJECTED",
+            [
+              "strict-ijson"
+            ]
+          ],
+          [
+            "{S:0061,006d,006f,0075,006e,0074=N:0,S:0066,006c,006f,006f,0072=N:0}",
+            [
+              "serde_json",
+              "model:go-encoding-json",
+              "model:node-json-parse",
+              "model:python-json",
+              "model:ruby-json",
+              "model:elixir-otp-json"
+            ]
+          ]
+        ],
+        "representation_classes": 3
+      }
+    },
+    {
+      "case": "integer-beyond-2-53",
+      "condition": "C2",
+      "why": "Python and Ruby keep the identifier exactly; Node and Go round it to a different account",
+      "reports": [
+        {
+          "id": "strict-ijson",
+          "provenance": {
+            "kind": "in_crate"
+          },
+          "observation": {
+            "outcome": "rejected"
+          },
+          "representation": null,
+          "detail": "number `9007199254740993` at byte 14 is outside the I-JSON interoperable range"
+        },
+        {
+          "id": "serde_json",
+          "provenance": {
+            "kind": "in_crate"
+          },
+          "observation": {
+            "outcome": "value",
+            "rendered": "{S:0061,0063,0063,006f,0075,006e,0074,005f,0069,0064=N:9007199254740993,S:0061,006d,006f,0075,006e,0074=N:1}"
+          },
+          "representation": "{S:0061,0063,0063,006f,0075,006e,0074,005f,0069,0064=I:9007199254740993,S:0061,006d,006f,0075,006e,0074=I:1}",
+          "detail": null
+        },
+        {
+          "id": "model:go-encoding-json",
+          "provenance": {
+            "kind": "modelled",
+            "models": "Go encoding/json",
+            "verification": {
+              "state": "unverified",
+              "why": "no go runtime was found on this host, so this model has not been measured"
+            }
+          },
+          "observation": {
+            "outcome": "value",
+            "rendered": "{S:0061,0063,0063,006f,0075,006e,0074,005f,0069,0064=N:9007199254740992,S:0061,006d,006f,0075,006e,0074=N:1}"
+          },
+          "representation": "{S:0061,0063,0063,006f,0075,006e,0074,005f,0069,0064=F:4340000000000000,S:0061,006d,006f,0075,006e,0074=F:3ff0000000000000}",
+          "detail": null
+        },
+        {
+          "id": "model:node-json-parse",
+          "provenance": {
+            "kind": "modelled",
+            "models": "Node JSON.parse",
+            "verification": {
+              "state": "unverified",
+              "why": "no node runtime was found on this host, so this model has not been measured"
+            }
+          },
+          "observation": {
+            "outcome": "value",
+            "rendered": "{S:0061,0063,0063,006f,0075,006e,0074,005f,0069,0064=N:9007199254740992,S:0061,006d,006f,0075,006e,0074=N:1}"
+          },
+          "representation": "{S:0061,0063,0063,006f,0075,006e,0074,005f,0069,0064=F:4340000000000000,S:0061,006d,006f,0075,006e,0074=F:3ff0000000000000}",
+          "detail": null
+        },
+        {
+          "id": "model:python-json",
+          "provenance": {
+            "kind": "modelled",
+            "models": "CPython json",
+            "verification": {
+              "state": "unverified",
+              "why": "no python runtime was found on this host, so this model has not been measured"
+            }
+          },
+          "observation": {
+            "outcome": "value",
+            "rendered": "{S:0061,0063,0063,006f,0075,006e,0074,005f,0069,0064=N:9007199254740993,S:0061,006d,006f,0075,006e,0074=N:1}"
+          },
+          "representation": "{S:0061,0063,0063,006f,0075,006e,0074,005f,0069,0064=I:9007199254740993,S:0061,006d,006f,0075,006e,0074=I:1}",
+          "detail": null
+        },
+        {
+          "id": "model:ruby-json",
+          "provenance": {
+            "kind": "modelled",
+            "models": "Ruby JSON",
+            "verification": {
+              "state": "unverified",
+              "why": "no ruby runtime was found on this host, so this model has not been measured"
+            }
+          },
+          "observation": {
+            "outcome": "value",
+            "rendered": "{S:0061,0063,0063,006f,0075,006e,0074,005f,0069,0064=N:9007199254740993,S:0061,006d,006f,0075,006e,0074=N:1}"
+          },
+          "representation": "{S:0061,0063,0063,006f,0075,006e,0074,005f,0069,0064=I:9007199254740993,S:0061,006d,006f,0075,006e,0074=I:1}",
+          "detail": null
+        },
+        {
+          "id": "model:elixir-otp-json",
+          "provenance": {
+            "kind": "modelled",
+            "models": "Elixir OTP :json",
+            "verification": {
+              "state": "unverified",
+              "why": "no Elixir runtime is installed on this host, so this behaviour has not been measured on this host; see `results/elixir-measurement.txt` for the GCP measurement this model is otherwise based on"
+            }
+          },
+          "observation": {
+            "outcome": "value",
+            "rendered": "{S:0061,0063,0063,006f,0075,006e,0074,005f,0069,0064=N:9007199254740993,S:0061,006d,006f,0075,006e,0074=N:1}"
+          },
+          "representation": "{S:0061,0063,0063,006f,0075,006e,0074,005f,0069,0064=I:9007199254740993,S:0061,006d,006f,0075,006e,0074=I:1}",
+          "detail": null
+        }
+      ],
+      "divergence": {
+        "classes": [
+          [
+            "REJECTED",
+            [
+              "strict-ijson"
+            ]
+          ],
+          [
+            "{S:0061,0063,0063,006f,0075,006e,0074,005f,0069,0064=N:9007199254740992,S:0061,006d,006f,0075,006e,0074=N:1}",
+            [
+              "model:go-encoding-json",
+              "model:node-json-parse"
+            ]
+          ],
+          [
+            "{S:0061,0063,0063,006f,0075,006e,0074,005f,0069,0064=N:9007199254740993,S:0061,006d,006f,0075,006e,0074=N:1}",
+            [
+              "serde_json",
+              "model:python-json",
+              "model:ruby-json",
+              "model:elixir-otp-json"
+            ]
+          ]
+        ],
+        "representation_classes": 3
+      }
+    },
+    {
+      "case": "percent-encoding-alias",
+      "condition": "C2",
+      "why": "two spellings of one resource, carried alongside a value that keeps strict mode from accepting the payload",
+      "reports": [
+        {
+          "id": "strict-ijson",
+          "provenance": {
+            "kind": "in_crate"
+          },
+          "observation": {
+            "outcome": "rejected"
+          },
+          "representation": null,
+          "detail": "number `1e-400` at byte 57 underflows to zero"
+        },
+        {
+          "id": "serde_json",
+          "provenance": {
+            "kind": "in_crate"
+          },
+          "observation": {
+            "outcome": "value",
+            "rendered": "{S:0061,006c,0069,0061,0073=S:002f,0076,0031,002f,0075,0073,0065,0072,0073,0025,0032,0046,006d,0065,S:0061,006d,006f,0075,006e,0074=N:0,S:0070,0061,0074,0068=S:002f,0076,0031,002f,0075,0073,0065,0072,0073,002f,006d,0065}"
+          },
+          "representation": "{S:0061,006c,0069,0061,0073=S:002f,0076,0031,002f,0075,0073,0065,0072,0073,0025,0032,0046,006d,0065,S:0061,006d,006f,0075,006e,0074=F:0000000000000000,S:0070,0061,0074,0068=S:002f,0076,0031,002f,0075,0073,0065,0072,0073,002f,006d,0065}",
+          "detail": null
+        },
+        {
+          "id": "model:go-encoding-json",
+          "provenance": {
+            "kind": "modelled",
+            "models": "Go encoding/json",
+            "verification": {
+              "state": "unverified",
+              "why": "no go runtime was found on this host, so this model has not been measured"
+            }
+          },
+          "observation": {
+            "outcome": "value",
+            "rendered": "{S:0061,006c,0069,0061,0073=S:002f,0076,0031,002f,0075,0073,0065,0072,0073,0025,0032,0046,006d,0065,S:0061,006d,006f,0075,006e,0074=N:0,S:0070,0061,0074,0068=S:002f,0076,0031,002f,0075,0073,0065,0072,0073,002f,006d,0065}"
+          },
+          "representation": "{S:0061,006c,0069,0061,0073=S:002f,0076,0031,002f,0075,0073,0065,0072,0073,0025,0032,0046,006d,0065,S:0061,006d,006f,0075,006e,0074=F:0000000000000000,S:0070,0061,0074,0068=S:002f,0076,0031,002f,0075,0073,0065,0072,0073,002f,006d,0065}",
+          "detail": null
+        },
+        {
+          "id": "model:node-json-parse",
+          "provenance": {
+            "kind": "modelled",
+            "models": "Node JSON.parse",
+            "verification": {
+              "state": "unverified",
+              "why": "no node runtime was found on this host, so this model has not been measured"
+            }
+          },
+          "observation": {
+            "outcome": "value",
+            "rendered": "{S:0061,006c,0069,0061,0073=S:002f,0076,0031,002f,0075,0073,0065,0072,0073,0025,0032,0046,006d,0065,S:0061,006d,006f,0075,006e,0074=N:0,S:0070,0061,0074,0068=S:002f,0076,0031,002f,0075,0073,0065,0072,0073,002f,006d,0065}"
+          },
+          "representation": "{S:0061,006c,0069,0061,0073=S:002f,0076,0031,002f,0075,0073,0065,0072,0073,0025,0032,0046,006d,0065,S:0061,006d,006f,0075,006e,0074=F:0000000000000000,S:0070,0061,0074,0068=S:002f,0076,0031,002f,0075,0073,0065,0072,0073,002f,006d,0065}",
+          "detail": null
+        },
+        {
+          "id": "model:python-json",
+          "provenance": {
+            "kind": "modelled",
+            "models": "CPython json",
+            "verification": {
+              "state": "unverified",
+              "why": "no python runtime was found on this host, so this model has not been measured"
+            }
+          },
+          "observation": {
+            "outcome": "value",
+            "rendered": "{S:0061,006c,0069,0061,0073=S:002f,0076,0031,002f,0075,0073,0065,0072,0073,0025,0032,0046,006d,0065,S:0061,006d,006f,0075,006e,0074=N:0,S:0070,0061,0074,0068=S:002f,0076,0031,002f,0075,0073,0065,0072,0073,002f,006d,0065}"
+          },
+          "representation": "{S:0061,006c,0069,0061,0073=S:002f,0076,0031,002f,0075,0073,0065,0072,0073,0025,0032,0046,006d,0065,S:0061,006d,006f,0075,006e,0074=F:0000000000000000,S:0070,0061,0074,0068=S:002f,0076,0031,002f,0075,0073,0065,0072,0073,002f,006d,0065}",
+          "detail": null
+        },
+        {
+          "id": "model:ruby-json",
+          "provenance": {
+            "kind": "modelled",
+            "models": "Ruby JSON",
+            "verification": {
+              "state": "unverified",
+              "why": "no ruby runtime was found on this host, so this model has not been measured"
+            }
+          },
+          "observation": {
+            "outcome": "value",
+            "rendered": "{S:0061,006c,0069,0061,0073=S:002f,0076,0031,002f,0075,0073,0065,0072,0073,0025,0032,0046,006d,0065,S:0061,006d,006f,0075,006e,0074=N:0,S:0070,0061,0074,0068=S:002f,0076,0031,002f,0075,0073,0065,0072,0073,002f,006d,0065}"
+          },
+          "representation": "{S:0061,006c,0069,0061,0073=S:002f,0076,0031,002f,0075,0073,0065,0072,0073,0025,0032,0046,006d,0065,S:0061,006d,006f,0075,006e,0074=F:0000000000000000,S:0070,0061,0074,0068=S:002f,0076,0031,002f,0075,0073,0065,0072,0073,002f,006d,0065}",
+          "detail": null
+        },
+        {
+          "id": "model:elixir-otp-json",
+          "provenance": {
+            "kind": "modelled",
+            "models": "Elixir OTP :json",
+            "verification": {
+              "state": "unverified",
+              "why": "no Elixir runtime is installed on this host, so this behaviour has not been measured on this host; see `results/elixir-measurement.txt` for the GCP measurement this model is otherwise based on"
+            }
+          },
+          "observation": {
+            "outcome": "value",
+            "rendered": "{S:0061,006c,0069,0061,0073=S:002f,0076,0031,002f,0075,0073,0065,0072,0073,0025,0032,0046,006d,0065,S:0061,006d,006f,0075,006e,0074=N:0,S:0070,0061,0074,0068=S:002f,0076,0031,002f,0075,0073,0065,0072,0073,002f,006d,0065}"
+          },
+          "representation": "{S:0061,006c,0069,0061,0073=S:002f,0076,0031,002f,0075,0073,0065,0072,0073,0025,0032,0046,006d,0065,S:0061,006d,006f,0075,006e,0074=F:0000000000000000,S:0070,0061,0074,0068=S:002f,0076,0031,002f,0075,0073,0065,0072,0073,002f,006d,0065}",
+          "detail": null
+        }
+      ],
+      "divergence": {
+        "classes": [
+          [
+            "REJECTED",
+            [
+              "strict-ijson"
+            ]
+          ],
+          [
+            "{S:0061,006c,0069,0061,0073=S:002f,0076,0031,002f,0075,0073,0065,0072,0073,0025,0032,0046,006d,0065,S:0061,006d,006f,0075,006e,0074=N:0,S:0070,0061,0074,0068=S:002f,0076,0031,002f,0075,0073,0065,0072,0073,002f,006d,0065}",
+            [
+              "serde_json",
+              "model:go-encoding-json",
+              "model:node-json-parse",
+              "model:python-json",
+              "model:ruby-json",
+              "model:elixir-otp-json"
+            ]
+          ]
+        ],
+        "representation_classes": 2
+      }
+    }
+  ],
+  "missing": []
+}

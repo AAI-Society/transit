@@ -1,0 +1,279 @@
+{
+  "banner": "HYPOTHESIS, NOT DATA. These 24 classifications are derived from published documentation and have not been measured against a running endpoint. C1 and C4 are properties of an implementation, which no document reveals. The sample was chosen for sector coverage, so it is a convenience sample and the shares below are not a population estimate. Verifying these rows by live probing is work this repository has not done.",
+  "counts": {
+    "Conditional": "7 (29.2%) of a convenience sample of 24, not a population estimate",
+    "NonQualifying": "13 (54.2%) of a convenience sample of 24, not a population estimate",
+    "Qualified": "4 (16.7%) of a convenience sample of 24, not a population estimate"
+  },
+  "endpoint": [
+    {
+      "c1": "satisfied",
+      "c2": "satisfied",
+      "c3": "satisfied",
+      "c4": "satisfied",
+      "endpoint": "pain.001 credit transfer",
+      "hypothesis": "qualified",
+      "probe_report": null,
+      "provider": "ISO 20022",
+      "sector": "Financial / Payments"
+    },
+    {
+      "c1": "client-dependent",
+      "c2": "satisfied",
+      "c3": "client-dependent",
+      "c4": "fails",
+      "endpoint": "POST /v1/charges",
+      "hypothesis": "conditional",
+      "probe_report": null,
+      "provider": "Stripe",
+      "sector": "Financial / Payments"
+    },
+    {
+      "c1": "client-dependent",
+      "c2": "satisfied",
+      "c3": "client-dependent",
+      "c4": "fails",
+      "endpoint": "POST /v2/payments",
+      "hypothesis": "conditional",
+      "probe_report": null,
+      "provider": "Square",
+      "sector": "Financial / Payments"
+    },
+    {
+      "c1": "fails",
+      "c2": "satisfied",
+      "c3": "fails",
+      "c4": "fails",
+      "endpoint": "POST /link/token/create",
+      "hypothesis": "non-qualifying",
+      "probe_report": null,
+      "provider": "Plaid",
+      "sector": "Financial / Payments"
+    },
+    {
+      "c1": "fails",
+      "c2": "fails",
+      "c3": "client-dependent",
+      "c4": "fails",
+      "endpoint": "RunInstances",
+      "hypothesis": "conditional",
+      "probe_report": null,
+      "provider": "AWS EC2",
+      "sector": "Cloud Infrastructure"
+    },
+    {
+      "c1": "fails",
+      "c2": "fails",
+      "c3": "satisfied",
+      "c4": "satisfied",
+      "endpoint": "PUT /object",
+      "hypothesis": "qualified",
+      "probe_report": null,
+      "provider": "AWS S3",
+      "sector": "Cloud Infrastructure"
+    },
+    {
+      "c1": "fails",
+      "c2": "fails",
+      "c3": "client-dependent",
+      "c4": "fails",
+      "endpoint": "instances.insert",
+      "hypothesis": "conditional",
+      "probe_report": null,
+      "provider": "GCP Compute",
+      "sector": "Cloud Infrastructure"
+    },
+    {
+      "c1": "fails",
+      "c2": "fails",
+      "c3": "satisfied",
+      "c4": "satisfied",
+      "endpoint": "PUT /subscriptions/...",
+      "hypothesis": "conditional",
+      "probe_report": null,
+      "provider": "Azure ARM",
+      "sector": "Cloud Infrastructure"
+    },
+    {
+      "c1": "fails",
+      "c2": "fails",
+      "c3": "fails",
+      "c4": "fails",
+      "endpoint": "POST /dns_records",
+      "hypothesis": "non-qualifying",
+      "probe_report": null,
+      "provider": "Cloudflare",
+      "sector": "Cloud Infrastructure"
+    },
+    {
+      "c1": "fails",
+      "c2": "fails",
+      "c3": "fails",
+      "c4": "fails",
+      "endpoint": "POST /user/repos",
+      "hypothesis": "non-qualifying",
+      "probe_report": null,
+      "provider": "GitHub",
+      "sector": "Developer Tools"
+    },
+    {
+      "c1": "satisfied",
+      "c2": "satisfied",
+      "c3": "satisfied",
+      "c4": "satisfied",
+      "endpoint": "PUT /repos/{o}/{r}/contents",
+      "hypothesis": "qualified",
+      "probe_report": null,
+      "provider": "GitHub",
+      "sector": "Developer Tools"
+    },
+    {
+      "c1": "fails",
+      "c2": "fails",
+      "c3": "fails",
+      "c4": "fails",
+      "endpoint": "POST /api/v4/projects",
+      "hypothesis": "non-qualifying",
+      "probe_report": null,
+      "provider": "GitLab",
+      "sector": "Developer Tools"
+    },
+    {
+      "c1": "fails",
+      "c2": "fails",
+      "c3": "fails",
+      "c4": "satisfied",
+      "endpoint": "POST /containers/create",
+      "hypothesis": "conditional",
+      "probe_report": null,
+      "provider": "Docker Engine",
+      "sector": "Developer Tools"
+    },
+    {
+      "c1": "fails",
+      "c2": "fails",
+      "c3": "fails",
+      "c4": "fails",
+      "endpoint": "POST /events",
+      "hypothesis": "non-qualifying",
+      "probe_report": null,
+      "provider": "Google Calendar",
+      "sector": "SaaS / Productivity"
+    },
+    {
+      "c1": "fails",
+      "c2": "fails",
+      "c3": "fails",
+      "c4": "fails",
+      "endpoint": "POST /gmail/v1/users/me/messages/send",
+      "hypothesis": "non-qualifying",
+      "probe_report": null,
+      "provider": "Google Workspace",
+      "sector": "SaaS / Productivity"
+    },
+    {
+      "c1": "fails",
+      "c2": "fails",
+      "c3": "fails",
+      "c4": "fails",
+      "endpoint": "POST /v1.0/me/sendMail",
+      "hypothesis": "non-qualifying",
+      "probe_report": null,
+      "provider": "Microsoft Graph",
+      "sector": "SaaS / Productivity"
+    },
+    {
+      "c1": "fails",
+      "c2": "fails",
+      "c3": "fails",
+      "c4": "fails",
+      "endpoint": "POST /chat.postMessage",
+      "hypothesis": "non-qualifying",
+      "probe_report": null,
+      "provider": "Slack",
+      "sector": "SaaS / Productivity"
+    },
+    {
+      "c1": "fails",
+      "c2": "fails",
+      "c3": "fails",
+      "c4": "fails",
+      "endpoint": "POST /rest/api/3/issue",
+      "hypothesis": "non-qualifying",
+      "probe_report": null,
+      "provider": "Jira",
+      "sector": "SaaS / Productivity"
+    },
+    {
+      "c1": "fails",
+      "c2": "satisfied",
+      "c3": "fails",
+      "c4": "fails",
+      "endpoint": "POST /sobjects/Account",
+      "hypothesis": "non-qualifying",
+      "probe_report": null,
+      "provider": "Salesforce",
+      "sector": "SaaS / Productivity"
+    },
+    {
+      "c1": "fails",
+      "c2": "fails",
+      "c3": "fails",
+      "c4": "fails",
+      "endpoint": "POST /crm/v3/objects/contacts",
+      "hypothesis": "non-qualifying",
+      "probe_report": null,
+      "provider": "HubSpot",
+      "sector": "SaaS / Productivity"
+    },
+    {
+      "c1": "fails",
+      "c2": "fails",
+      "c3": "fails",
+      "c4": "fails",
+      "endpoint": "POST /api/v1/users",
+      "hypothesis": "non-qualifying",
+      "probe_report": null,
+      "provider": "Okta",
+      "sector": "Identity / Security"
+    },
+    {
+      "c1": "fails",
+      "c2": "fails",
+      "c3": "fails",
+      "c4": "fails",
+      "endpoint": "POST /api/v2/users",
+      "hypothesis": "non-qualifying",
+      "probe_report": null,
+      "provider": "Auth0",
+      "sector": "Identity / Security"
+    },
+    {
+      "c1": "fails",
+      "c2": "fails",
+      "c3": "satisfied",
+      "c4": "satisfied",
+      "endpoint": "POST /v1/secret/data",
+      "hypothesis": "qualified",
+      "probe_report": null,
+      "provider": "HashiCorp Vault",
+      "sector": "Database / Storage"
+    },
+    {
+      "c1": "fails",
+      "c2": "fails",
+      "c3": "satisfied",
+      "c4": "fails",
+      "endpoint": "POST /vectors/upsert",
+      "hypothesis": "conditional",
+      "probe_report": null,
+      "provider": "Pinecone",
+      "sector": "Database / Storage"
+    }
+  ],
+  "evidence": "desk_study",
+  "evidence_caveat": "HYPOTHESIS from a documentation review, never measured; verifying it is work this paper has not done",
+  "note": "24 endpoints across six sectors, chosen for coverage rather than sampled.",
+  "source": "documentation",
+  "verified_live": false
+}

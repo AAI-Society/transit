@@ -1,0 +1,98 @@
+{
+  "target": "in-process hostile endpoint FailureModes { lenient_decoder: true, profile_defaults: true, uri_aliasing: true, non_idempotent: true, no_state_pinning: true }",
+  "scenario": "all-hostile",
+  "evidence": "hostile_server",
+  "checks_run": [
+    "c1-parameter-defaulting",
+    "c2-duplicate-key",
+    "c2-uri-alias",
+    "c3-retry-ambiguity",
+    "c2-corpus",
+    "c3-retry-residual"
+  ],
+  "checks_applicable": true,
+  "findings": [
+    {
+      "id": "c1-parameter-defaulting",
+      "condition": "C1",
+      "title": "the endpoint executed an action the policy would have refused",
+      "policy_saw": "{\"to\":\"acct-9\",\"amount\":100} — no fee_tier, so the ordinary-transfer rule approved it",
+      "endpoint_did": "fee_tier resolved to `priority` from server-side profile state",
+      "evidence": "hostile_server"
+    },
+    {
+      "id": "c2-duplicate-key",
+      "condition": "C2",
+      "title": "the endpoint resolved a duplicate key differently from the policy engine",
+      "policy_saw": "to = acct-1, the first binding a first-key-wins decoder returns",
+      "endpoint_did": "paid `acct-9`",
+      "evidence": "hostile_server"
+    },
+    {
+      "id": "c2-uri-alias",
+      "condition": "C2",
+      "title": "two canonical forms name one resource, so canonicalization is not injective",
+      "policy_saw": "/v1/users/me",
+      "endpoint_did": "resolved to usr_99812, the same resource /v1/users/usr_99812 names",
+      "evidence": "hostile_server"
+    },
+    {
+      "id": "c3-retry-ambiguity",
+      "condition": "C3",
+      "title": "neither branch of a network retry is correct",
+      "policy_saw": "one authorized order; the retry with the same nonce returned 409 so the client recorded a failure",
+      "endpoint_did": "committed 1 order despite the reported failure, and with a fresh nonce executed twice (2 orders)",
+      "evidence": "hostile_server"
+    },
+    {
+      "id": "c2-corpus-duplicate-key-recipient",
+      "condition": "C2",
+      "title": "`duplicate-key-recipient` executed against a payload strict ingestion refuses",
+      "policy_saw": "a strict decoder refuses these bytes outright",
+      "endpoint_did": "executed a transfer to `acct-9`",
+      "evidence": "hostile_server"
+    },
+    {
+      "id": "c2-corpus-duplicate-key-amount",
+      "condition": "C2",
+      "title": "`duplicate-key-amount` executed against a payload strict ingestion refuses",
+      "policy_saw": "a strict decoder refuses these bytes outright",
+      "endpoint_did": "executed a transfer to `acct-1`",
+      "evidence": "hostile_server"
+    },
+    {
+      "id": "c2-corpus-lone-surrogate-high",
+      "condition": "C2",
+      "title": "`lone-surrogate-high` executed against a payload strict ingestion refuses",
+      "policy_saw": "a strict decoder refuses these bytes outright",
+      "endpoint_did": "executed a transfer to `acct-�-9`",
+      "evidence": "hostile_server"
+    },
+    {
+      "id": "c2-corpus-lone-surrogate-low",
+      "condition": "C2",
+      "title": "`lone-surrogate-low` executed against a payload strict ingestion refuses",
+      "policy_saw": "a strict decoder refuses these bytes outright",
+      "endpoint_did": "executed a transfer to `acct-�-9`",
+      "evidence": "hostile_server"
+    },
+    {
+      "id": "c2-corpus-two-high-surrogates-collapse-into-one-character",
+      "condition": "C2",
+      "title": "`two-high-surrogates-collapse-into-one-character` executed against a payload strict ingestion refuses",
+      "policy_saw": "a strict decoder refuses these bytes outright",
+      "endpoint_did": "executed a transfer to `acct-��-9`",
+      "evidence": "hostile_server"
+    }
+  ],
+  "residual": [
+    {
+      "id": "c3-retry-residual",
+      "condition": "C3",
+      "title": "a committed operation was reported to the client as failed",
+      "policy_saw": "the retry was refused with 409",
+      "endpoint_did": "kept the 1 order it had already committed; no message-level mechanism can tell this retry from a replay",
+      "evidence": "hostile_server"
+    }
+  ]
+}

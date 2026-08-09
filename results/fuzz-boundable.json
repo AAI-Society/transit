@@ -1,0 +1,25 @@
+{
+  "target": "in-process hostile endpoint FailureModes { lenient_decoder: false, profile_defaults: false, uri_aliasing: false, non_idempotent: false, no_state_pinning: false }",
+  "scenario": "boundable",
+  "evidence": "hostile_server",
+  "checks_run": [
+    "c1-parameter-defaulting",
+    "c2-duplicate-key",
+    "c2-uri-alias",
+    "c3-retry-ambiguity",
+    "c2-corpus",
+    "c3-retry-residual"
+  ],
+  "checks_applicable": true,
+  "findings": [],
+  "residual": [
+    {
+      "id": "c3-retry-residual",
+      "condition": "C3",
+      "title": "a committed operation was reported to the client as failed",
+      "policy_saw": "the retry was refused with 409",
+      "endpoint_did": "kept the 1 order it had already committed; no message-level mechanism can tell this retry from a replay",
+      "evidence": "hostile_server"
+    }
+  ]
+}

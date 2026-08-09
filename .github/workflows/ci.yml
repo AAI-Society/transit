@@ -11,6 +11,28 @@ jobs:
       - run: cargo fmt --check
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test --all-targets
+      # Pinned versions, before the results step: the cross-language run needs
+      # runtimes to find, and pinning them keeps `differential-host.json` from
+      # drifting between CI runs for reasons unrelated to this crate.
+      - uses: actions/setup-node@v4
+        with: { node-version: '22.11.0' }
+      - uses: actions/setup-go@v5
+        with: { go-version: '1.23.4' }
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12.7' }
+      - uses: ruby/setup-ruby@v1
+        with: { ruby-version: '3.3.6' }
+      - name: results are current
+        run: |
+          ./scripts/regen-results.sh
+          # `differential-host.json` is excluded on purpose: it is a
+          # measurement of the machine that made it, so diffing it across
+          # environments would fail for the wrong reason. The claim it
+          # supports is gated by tests/acceptance.rs instead.
+          git diff --exit-code -- results/ ':!results/differential-host.json' || {
+            echo "results/ is stale — run ./scripts/regen-results.sh and commit"
+            exit 1
+          }
 
   container:
     runs-on: ubuntu-latest

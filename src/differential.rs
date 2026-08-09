@@ -237,6 +237,42 @@ pub fn missing() -> Vec<String> {
     discovery().missing
 }
 
+/// The corpus through the in-crate decoders only. Every host produces
+/// byte-identical output, which is what makes `results/` diff-gateable in
+/// CI; the cross-language run is a property of an environment and is
+/// recorded separately, with that environment attached.
+///
+/// `in_crate()` rather than `in_crate_verified_against(&discovery().present)`
+/// on purpose. The latter promotes a model's provenance to `RuntimeInstalled`
+/// wherever that runtime happens to exist, which is exactly the host
+/// dependence this function exists to avoid: the same corpus would serialize
+/// differently on a machine with Go installed than on one without, and the
+/// CI diff gate would fail for a reason that has nothing to do with a code
+/// change. Here every model reports `Unverified`, on every host.
+pub fn run_in_crate_only() -> Run {
+    let cases = cases()
+        .into_iter()
+        .map(|c| {
+            let reports: Vec<DecoderReport> = crate::decoder::in_crate()
+                .iter()
+                .map(|d| d.observe(&c.payload))
+                .collect();
+            let divergence = classify(&reports);
+            CaseReport {
+                case: c.name.to_string(),
+                condition: Some(c.condition),
+                why: c.why.to_string(),
+                reports,
+                divergence,
+            }
+        })
+        .collect();
+    Run {
+        cases,
+        missing: Vec::new(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

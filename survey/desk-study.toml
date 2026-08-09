@@ -1,0 +1,296 @@
+# The desk study's classification of 24 production endpoints against C1-C4.
+#
+# THIS IS A HYPOTHESIS. Every row was derived by reading published
+# documentation. None has been measured against a running endpoint, and C1
+# (server-side defaulting) and C4 (state dependence) are properties of an
+# implementation that documentation does not reveal. Converting these rows
+# into evidence is what `transit probe` is for, and it has not been run.
+#
+# `verified_live` may not be set to true while `source` is "documentation";
+# loading refuses it.
+#
+# TRANSCRIPTION. The `hypothesis` column is the desk study's own tier,
+# copied verbatim, and it is the only column any test asserts. The four
+# per-condition columns are a reading of the desk table's prose cells under
+# this rule, and are the reader's guide rather than a measurement:
+#
+#   "Native ...", "Required ...", "Idempotent on ...", an explicit pinning
+#   mechanism ("If-Match / ETag", "CAS Version", "Parent sha", "Match
+#   Headers", "Image Digest", "Cryptographic Context")   -> satisfied
+#   "Header-based", "Token-based", "Query-based",
+#   "Optional Defaults", "Implicit Defaults"             -> client-dependent
+#   "Non-Idempotent", "None"                             -> fails
+#   any other defaulting or aliasing cell                -> fails
+#
+# TWO TENSIONS IN THE SOURCE, recorded rather than smoothed over.
+#
+# First, the arithmetic. Counting this table gives 4 qualified, 7
+# conditional, 13 non-qualifying. The desk study's prose says 4 / 6 / 14 —
+# "25.0% (6 out of 24)" and "58.3% (14 out of 24)" — and P02 inherits those
+# figures. Square is a Conditional row the 25% count omits and the 58% count
+# then absorbs. The rows are right and the arithmetic over them is wrong.
+# `the_shipped_counts_match_the_desk_study_split` pins 4 / 7 / 13.
+#
+# Second, some tiers do not follow from their own cells. AWS S3 is rated
+# Qualified while its C1 and C2 cells name default ACLs and bucket/key
+# aliases; Docker Engine is rated Conditional while its C3 cell says
+# Non-Idempotent. A tier here is the desk study's overall judgement, not a
+# function computed from the four columns — unlike `transit classify`, whose
+# verdict *is* such a function. Where the two disagree, that disagreement is
+# a finding about the desk study and is reported rather than tuned away.
+
+source = "documentation"
+verified_live = false
+note = "24 endpoints across six sectors, chosen for coverage rather than sampled."
+
+# --- Financial / Payments ----------------------------------------------------
+
+[[endpoint]]
+sector = "Financial / Payments"
+provider = "ISO 20022"
+endpoint = "pain.001 credit transfer"
+c1 = "satisfied"
+c2 = "satisfied"
+c3 = "satisfied"
+c4 = "satisfied"
+hypothesis = "qualified"
+
+[[endpoint]]
+sector = "Financial / Payments"
+provider = "Stripe"
+endpoint = "POST /v1/charges"
+c1 = "client-dependent"
+c2 = "satisfied"
+c3 = "client-dependent"
+c4 = "fails"
+hypothesis = "conditional"
+
+[[endpoint]]
+sector = "Financial / Payments"
+provider = "Square"
+endpoint = "POST /v2/payments"
+c1 = "client-dependent"
+c2 = "satisfied"
+c3 = "client-dependent"
+c4 = "fails"
+hypothesis = "conditional"
+
+[[endpoint]]
+sector = "Financial / Payments"
+provider = "Plaid"
+endpoint = "POST /link/token/create"
+c1 = "fails"
+c2 = "satisfied"
+c3 = "fails"
+c4 = "fails"
+hypothesis = "non-qualifying"
+
+# --- Cloud Infrastructure ----------------------------------------------------
+
+[[endpoint]]
+sector = "Cloud Infrastructure"
+provider = "AWS EC2"
+endpoint = "RunInstances"
+c1 = "fails"
+c2 = "fails"
+c3 = "client-dependent"
+c4 = "fails"
+hypothesis = "conditional"
+
+[[endpoint]]
+sector = "Cloud Infrastructure"
+provider = "AWS S3"
+endpoint = "PUT /object"
+c1 = "fails"
+c2 = "fails"
+c3 = "satisfied"
+c4 = "satisfied"
+hypothesis = "qualified"
+
+[[endpoint]]
+sector = "Cloud Infrastructure"
+provider = "GCP Compute"
+endpoint = "instances.insert"
+c1 = "fails"
+c2 = "fails"
+c3 = "client-dependent"
+c4 = "fails"
+hypothesis = "conditional"
+
+[[endpoint]]
+sector = "Cloud Infrastructure"
+provider = "Azure ARM"
+endpoint = "PUT /subscriptions/..."
+c1 = "fails"
+c2 = "fails"
+c3 = "satisfied"
+c4 = "satisfied"
+hypothesis = "conditional"
+
+[[endpoint]]
+sector = "Cloud Infrastructure"
+provider = "Cloudflare"
+endpoint = "POST /dns_records"
+c1 = "fails"
+c2 = "fails"
+c3 = "fails"
+c4 = "fails"
+hypothesis = "non-qualifying"
+
+# --- Developer Tools ---------------------------------------------------------
+
+[[endpoint]]
+sector = "Developer Tools"
+provider = "GitHub"
+endpoint = "POST /user/repos"
+c1 = "fails"
+c2 = "fails"
+c3 = "fails"
+c4 = "fails"
+hypothesis = "non-qualifying"
+
+[[endpoint]]
+sector = "Developer Tools"
+provider = "GitHub"
+endpoint = "PUT /repos/{o}/{r}/contents"
+c1 = "satisfied"
+c2 = "satisfied"
+c3 = "satisfied"
+c4 = "satisfied"
+hypothesis = "qualified"
+
+[[endpoint]]
+sector = "Developer Tools"
+provider = "GitLab"
+endpoint = "POST /api/v4/projects"
+c1 = "fails"
+c2 = "fails"
+c3 = "fails"
+c4 = "fails"
+hypothesis = "non-qualifying"
+
+[[endpoint]]
+sector = "Developer Tools"
+provider = "Docker Engine"
+endpoint = "POST /containers/create"
+c1 = "fails"
+c2 = "fails"
+c3 = "fails"
+c4 = "satisfied"
+hypothesis = "conditional"
+
+# --- SaaS / Productivity -----------------------------------------------------
+
+[[endpoint]]
+sector = "SaaS / Productivity"
+provider = "Google Calendar"
+endpoint = "POST /events"
+c1 = "fails"
+c2 = "fails"
+c3 = "fails"
+c4 = "fails"
+hypothesis = "non-qualifying"
+
+[[endpoint]]
+sector = "SaaS / Productivity"
+provider = "Google Workspace"
+endpoint = "POST /gmail/v1/users/me/messages/send"
+c1 = "fails"
+c2 = "fails"
+c3 = "fails"
+c4 = "fails"
+hypothesis = "non-qualifying"
+
+[[endpoint]]
+sector = "SaaS / Productivity"
+provider = "Microsoft Graph"
+endpoint = "POST /v1.0/me/sendMail"
+c1 = "fails"
+c2 = "fails"
+c3 = "fails"
+c4 = "fails"
+hypothesis = "non-qualifying"
+
+[[endpoint]]
+sector = "SaaS / Productivity"
+provider = "Slack"
+endpoint = "POST /chat.postMessage"
+c1 = "fails"
+c2 = "fails"
+c3 = "fails"
+c4 = "fails"
+hypothesis = "non-qualifying"
+
+[[endpoint]]
+sector = "SaaS / Productivity"
+provider = "Jira"
+endpoint = "POST /rest/api/3/issue"
+c1 = "fails"
+c2 = "fails"
+c3 = "fails"
+c4 = "fails"
+hypothesis = "non-qualifying"
+
+[[endpoint]]
+sector = "SaaS / Productivity"
+provider = "Salesforce"
+endpoint = "POST /sobjects/Account"
+c1 = "fails"
+c2 = "satisfied"
+c3 = "fails"
+c4 = "fails"
+hypothesis = "non-qualifying"
+
+[[endpoint]]
+sector = "SaaS / Productivity"
+provider = "HubSpot"
+endpoint = "POST /crm/v3/objects/contacts"
+c1 = "fails"
+c2 = "fails"
+c3 = "fails"
+c4 = "fails"
+hypothesis = "non-qualifying"
+
+# --- Identity / Security -----------------------------------------------------
+
+[[endpoint]]
+sector = "Identity / Security"
+provider = "Okta"
+endpoint = "POST /api/v1/users"
+c1 = "fails"
+c2 = "fails"
+c3 = "fails"
+c4 = "fails"
+hypothesis = "non-qualifying"
+
+[[endpoint]]
+sector = "Identity / Security"
+provider = "Auth0"
+endpoint = "POST /api/v2/users"
+c1 = "fails"
+c2 = "fails"
+c3 = "fails"
+c4 = "fails"
+hypothesis = "non-qualifying"
+
+# --- Database / Storage ------------------------------------------------------
+
+[[endpoint]]
+sector = "Database / Storage"
+provider = "HashiCorp Vault"
+endpoint = "POST /v1/secret/data"
+c1 = "fails"
+c2 = "fails"
+c3 = "satisfied"
+c4 = "satisfied"
+hypothesis = "qualified"
+
+[[endpoint]]
+sector = "Database / Storage"
+provider = "Pinecone"
+endpoint = "POST /vectors/upsert"
+c1 = "fails"
+c2 = "fails"
+c3 = "satisfied"
+c4 = "fails"
+hypothesis = "conditional"

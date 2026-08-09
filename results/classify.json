@@ -1,0 +1,160 @@
+{
+  "iso20022-pain001": [
+  {
+    "operation": "customerCreditTransferInitiation",
+    "method": "POST",
+    "path": "/pain.001",
+    "conditions": [
+      [
+        "C1",
+        {
+          "state": "satisfied"
+        }
+      ],
+      [
+        "C2",
+        {
+          "state": "satisfied"
+        }
+      ],
+      [
+        "C3",
+        {
+          "state": "satisfied"
+        }
+      ],
+      [
+        "C4",
+        {
+          "state": "satisfied"
+        }
+      ]
+    ],
+    "verdict": "Qualified",
+    "failing": [],
+    "evidence": "spec_derived"
+  }
+]
+,
+  "s3-put-if-match": [
+  {
+    "operation": "putObject",
+    "method": "PUT",
+    "path": "/{bucket}/{key}",
+    "conditions": [
+      [
+        "C1",
+        {
+          "state": "satisfied"
+        }
+      ],
+      [
+        "C2",
+        {
+          "state": "satisfied"
+        }
+      ],
+      [
+        "C3",
+        {
+          "state": "satisfied"
+        }
+      ],
+      [
+        "C4",
+        {
+          "state": "satisfied"
+        }
+      ]
+    ],
+    "verdict": "Qualified",
+    "failing": [],
+    "evidence": "spec_derived"
+  }
+]
+,
+  "slack-chat-postmessage": [
+  {
+    "operation": "chatPostMessage",
+    "method": "POST",
+    "path": "/api/chat.postMessage",
+    "conditions": [
+      [
+        "C1",
+        {
+          "state": "failed",
+          "why": "`parse` is documented as filled from server-side state"
+        }
+      ],
+      [
+        "C2",
+        {
+          "state": "failed",
+          "why": "`channel` accepts more than one spelling of the same resource"
+        }
+      ],
+      [
+        "C3",
+        {
+          "state": "failed",
+          "why": "POST is not idempotent and the interface offers no idempotency key the client could supply"
+        }
+      ],
+      [
+        "C4",
+        {
+          "state": "unknown",
+          "why": "no precondition mechanism is described, and a specification cannot say whether the effect depends on server state"
+        }
+      ]
+    ],
+    "verdict": "NonQualifying",
+    "failing": [
+      "C1",
+      "C2",
+      "C3"
+    ],
+    "evidence": "spec_derived"
+  }
+]
+,
+  "stripe-charges": [
+  {
+    "operation": "createCharge",
+    "method": "POST",
+    "path": "/v1/charges",
+    "conditions": [
+      [
+        "C1",
+        {
+          "state": "client_dependent",
+          "how": "send every optional parameter explicitly: capture, currency, description, idempotency-key (header)"
+        }
+      ],
+      [
+        "C2",
+        {
+          "state": "satisfied"
+        }
+      ],
+      [
+        "C3",
+        {
+          "state": "client_dependent",
+          "how": "send the optional `idempotency-key` on every request"
+        }
+      ],
+      [
+        "C4",
+        {
+          "state": "unknown",
+          "why": "no precondition mechanism is described, and a specification cannot say whether the effect depends on server state"
+        }
+      ]
+    ],
+    "verdict": "Conditional",
+    "failing": [],
+    "evidence": "spec_derived"
+  }
+]
+}

@@ -9,6 +9,7 @@ pub mod hostile;
 pub mod jcs;
 pub mod json;
 pub mod probe;
+pub mod survey;
 pub mod transport;
 
 pub use jcs::{canonicalize, digest, JcsError};
