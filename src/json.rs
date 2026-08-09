@@ -82,12 +82,40 @@ pub enum DuplicatePolicy {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SurrogatePolicy {
-    /// Strict, and Ruby's `JSON.parse`, which raises.
+    /// Strict.
     Reject,
     /// Go `encoding/json`: silently substitutes U+FFFD, changing the bytes.
     Replace,
     /// Node and Python: the unpaired code unit survives into the value.
     Retain,
+    /// Ruby `JSON.parse` (measured against json gem 2.1.0 on Ruby 2.6.10;
+    /// a fix-round-1 correction — the desk study modelled Ruby as uniformly
+    /// `Reject`, and a direct measurement contradicted that on both halves).
+    /// Ruby's surrogate handling is genuinely asymmetric and does not fit
+    /// the uniform Reject/Replace/Retain shape at all:
+    ///   * A lone *low* surrogate (no preceding high surrogate) is accepted
+    ///     and retained verbatim: `"\udc00"` parses successfully, keeping
+    ///     the raw code unit — measured as the WTF-8-ish byte sequence
+    ///     `ed b0 80`, i.e. `S:dc00` once rendered as UTF-16 units.
+    ///   * A lone *high* surrogate — one not immediately followed by
+    ///     another `\uXXXX` escape — is rejected: `"\ud800"` raises
+    ///     `incomplete surrogate pair`. So does a high surrogate followed by
+    ///     a raw, unescaped letter `A` rather than a second `\u` escape —
+    ///     the source text `\ud800` + a literal `A` character also raises.
+    ///     Measured directly; an earlier draft of this correction assumed a
+    ///     raw character paired too, and it does not.
+    ///   * A high surrogate immediately followed by ANY `\uXXXX` escape —
+    ///     even one that is not itself a valid low surrogate — is combined:
+    ///     both halves are masked with `0x3FF` and combined as though the
+    ///     second one were the low half, with no range validation at all.
+    ///     A high-surrogate escape followed by a *second* `\u` escape
+    ///     naming plain U+0041 (the letter A, spelled as an escape rather
+    ///     than raw) parses to U+10041, and that character is not emitted
+    ///     on its own — it is consumed into the surrogate arithmetic.
+    ///     A high-surrogate escape followed by a `\u` escape naming
+    ///     U+DBFF (itself a *high* surrogate, not a low one) parses to
+    ///     U+103FF by the identical formula.
+    RubyPairAnyEscape,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -95,28 +123,64 @@ pub enum NumberPolicy {
     /// Strict: reject anything outside the I-JSON interoperable range,
     /// anything that underflows, and negative zero.
     RejectOutOfRange,
-    /// Node: every number becomes a double, silently overflowing to
-    /// +/-Infinity when a literal's magnitude exceeds a double's finite
-    /// range. Measured: `JSON.parse("1e400")` is `Infinity`, not an error.
+    /// Node, Go, Ruby, Elixir: every number becomes a double (integers
+    /// included — an arbitrary-precision decoder keeps the integer exact
+    /// instead; see `ArbitraryPrecision`). Whether an out-of-range literal
+    /// silently becomes an infinity or is rejected is `OverflowPolicy`, an
+    /// orthogonal knob — see that type.
     Ieee754Double,
-    /// Go `encoding/json`: every number becomes a double, but unlike Node a
-    /// literal that overflows a double's finite range is rejected rather
-    /// than silently becoming an infinity. This is a Task 4 correction: the
-    /// desk study modelled Go identically to Node here, and the real
-    /// `encoding/json.Unmarshal` disagreed on the first host measurement —
-    /// `json: cannot unmarshal number 1e400 into Go value of type float64`.
-    /// `encoding/json` surfaces `strconv.ParseFloat`'s `ErrRange` as an
-    /// `UnmarshalTypeError` instead of keeping the rounded-to-infinity
-    /// result the way Node, Python and Ruby all do.
-    Ieee754DoubleFinite,
-    /// Python and Ruby: integer literals stay exact.
+    /// Python and Ruby: integer literals stay exact. A fractional literal
+    /// still becomes a double, and is still subject to `OverflowPolicy`.
     ArbitraryPrecision,
 }
 
+/// Whether a literal whose magnitude overflows a `f64`'s finite range (e.g.
+/// `1e400`) is accepted as +/-Infinity or rejected outright. Orthogonal to
+/// `NumberPolicy` on purpose: it cross-cuts both `Ieee754Double` (Go
+/// rejects, Node does not) and `ArbitraryPrecision` (Elixir rejects, Python
+/// and Ruby do not), so folding it into a fourth/fifth `NumberPolicy`
+/// variant would have meant duplicating every finite-range branch instead of
+/// checking one extra flag in each.
+///
+/// Go: measured — `encoding/json.Unmarshal` surfaces `strconv.ParseFloat`'s
+/// `ErrRange` as `json: cannot unmarshal number 1e400 into Go value of type
+/// float64`, a Task 4 correction (the desk study modelled Go identically to
+/// Node here). Elixir: measured on GCP (`results/elixir-measurement.txt`) —
+/// real `:json` rejects `1e400` with `{:unexpected_sequence, "1.0e400"}`
+/// where the model previously parsed it to infinity and accepted, the same
+/// mistake Task 4 found and fixed for Go.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OverflowPolicy {
+    /// Node, Python, Ruby: silently overflows to +/-Infinity. Measured:
+    /// `JSON.parse("1e400")` is `Infinity` in both Node and Ruby, and
+    /// `json.loads("1e400")` is `inf` in Python — not an error in any of
+    /// the three.
+    Permit,
+    /// Go, Elixir: a literal that would overflow to +/-Infinity is a parse
+    /// error instead.
+    Reject,
+}
+
+/// Whether the bare (non-standard, not RFC 8259) tokens `NaN`, `Infinity`
+/// and `-Infinity` are accepted as number values. This is lexer-level, not
+/// `NumberPolicy`: these are not spelled as JSON numbers at all (no digits),
+/// so `classify_number` never sees them — `value()` recognizes the literal
+/// token directly, the same way it already recognizes `true`/`false`/`null`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NonFiniteLiteralPolicy {
+    /// RFC 8259 §6 does not define these as JSON tokens, and every decoder
+    /// modelled here except Python rejects them. The default.
+    Reject,
+    /// CPython's `json.loads` default (`parse_constant`/`allow_nan` both
+    /// default to allowing them, measured): bare `NaN`, `Infinity` and
+    /// `-Infinity` tokens parse to the IEEE-754 special value they name.
+    Accept,
+}
+
 /// RFC 7493 §2.1 forbids noncharacters as well as surrogates. It is a
-/// separate knob from `SurrogatePolicy` because Ruby rejects lone surrogates
-/// while still accepting noncharacters, so the two do not travel together in
-/// any real decoder.
+/// separate knob from `SurrogatePolicy` because every lenient decoder
+/// modelled here accepts noncharacters while disagreeing with each other
+/// about surrogates, so the two do not travel together in any real decoder.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NoncharacterPolicy {
     /// RFC 7493. Only strict mode does this; no production decoder does.
@@ -129,6 +193,8 @@ pub struct Config {
     pub duplicates: DuplicatePolicy,
     pub surrogates: SurrogatePolicy,
     pub numbers: NumberPolicy,
+    pub overflow: OverflowPolicy,
+    pub non_finite: NonFiniteLiteralPolicy,
     pub noncharacters: NoncharacterPolicy,
 }
 
@@ -150,6 +216,11 @@ impl Config {
             duplicates: DuplicatePolicy::Reject,
             surrogates: SurrogatePolicy::Reject,
             numbers: NumberPolicy::RejectOutOfRange,
+            // Irrelevant to `RejectOutOfRange`, which independently rejects
+            // any non-finite result on its own path, but every `Config`
+            // needs a value.
+            overflow: OverflowPolicy::Reject,
+            non_finite: NonFiniteLiteralPolicy::Reject,
             noncharacters: NoncharacterPolicy::Reject,
         }
     }
@@ -158,9 +229,11 @@ impl Config {
         Config {
             duplicates: DuplicatePolicy::LastWins,
             surrogates: SurrogatePolicy::Replace,
-            // Ieee754DoubleFinite, not Ieee754Double: see the Task 4
-            // correction recorded on that variant.
-            numbers: NumberPolicy::Ieee754DoubleFinite,
+            numbers: NumberPolicy::Ieee754Double,
+            // Fix round 1, C1: measured against the real `go` binary — see
+            // `OverflowPolicy`'s doc comment for the evidence.
+            overflow: OverflowPolicy::Reject,
+            non_finite: NonFiniteLiteralPolicy::Reject,
             noncharacters: NoncharacterPolicy::Accept,
         }
     }
@@ -170,6 +243,8 @@ impl Config {
             duplicates: DuplicatePolicy::LastWins,
             surrogates: SurrogatePolicy::Retain,
             numbers: NumberPolicy::Ieee754Double,
+            overflow: OverflowPolicy::Permit,
+            non_finite: NonFiniteLiteralPolicy::Reject,
             noncharacters: NoncharacterPolicy::Accept,
         }
     }
@@ -179,6 +254,11 @@ impl Config {
             duplicates: DuplicatePolicy::LastWins,
             surrogates: SurrogatePolicy::Retain,
             numbers: NumberPolicy::ArbitraryPrecision,
+            overflow: OverflowPolicy::Permit,
+            // Fix round 1, C4: `json.loads`'s `allow_nan` default accepts
+            // bare `NaN`/`Infinity`/`-Infinity` — measured, and the only one
+            // of the four modelled runtimes that does.
+            non_finite: NonFiniteLiteralPolicy::Accept,
             noncharacters: NoncharacterPolicy::Accept,
         }
     }
@@ -186,21 +266,34 @@ impl Config {
     pub const fn ruby_json() -> Self {
         Config {
             duplicates: DuplicatePolicy::LastWins,
-            surrogates: SurrogatePolicy::Reject,
+            // Fix round 1, C3: measured against the real `ruby` binary —
+            // see `SurrogatePolicy::RubyPairAnyEscape`'s doc comment. Plain
+            // `Reject` (this crate's original model) was wrong for a lone
+            // low surrogate and for a high surrogate paired with any
+            // subsequent escape.
+            surrogates: SurrogatePolicy::RubyPairAnyEscape,
             numbers: NumberPolicy::ArbitraryPrecision,
+            overflow: OverflowPolicy::Permit,
+            non_finite: NonFiniteLiteralPolicy::Reject,
             noncharacters: NoncharacterPolicy::Accept,
         }
     }
 
-    /// Elixir OTP `:json`. **Modelled from documentation and not verified**:
-    /// no Elixir runtime is installed on the development host, so this
-    /// configuration is a claim of exactly the kind this tool exists to
-    /// distrust. Task 4 records that distinction in its provenance.
+    /// Elixir OTP `:json`. Measured on GCP (elixir 1.17.3 / OTP 27); see
+    /// `results/elixir-measurement.txt`. First-key-wins, exact integers,
+    /// rejecting both surrogate halves, accepting noncharacters, and
+    /// accepting negative zero / underflow are all confirmed as modelled.
+    /// Overflow was not: fix round 1, C6, corrects it below.
     pub const fn elixir_otp_json() -> Self {
         Config {
             duplicates: DuplicatePolicy::FirstWins,
             surrogates: SurrogatePolicy::Reject,
             numbers: NumberPolicy::ArbitraryPrecision,
+            // Measured: real `:json` rejects `1e400` with
+            // `{:unexpected_sequence, "1.0e400"}` rather than parsing it to
+            // infinity. See `OverflowPolicy`'s doc comment.
+            overflow: OverflowPolicy::Reject,
+            non_finite: NonFiniteLiteralPolicy::Reject,
             noncharacters: NoncharacterPolicy::Accept,
         }
     }
@@ -217,8 +310,8 @@ pub enum JsonError {
     #[error("number `{literal}` at byte {at} is outside the I-JSON interoperable range")]
     NumberOutOfRange { literal: String, at: usize },
     #[error(
-        "number `{literal}` at byte {at} overflows the finite range of a 64-bit float; Go's \
-         encoding/json rejects it rather than silently producing an infinity"
+        "number `{literal}` at byte {at} overflows the finite range of a 64-bit float; this \
+         decoder rejects it rather than silently producing an infinity"
     )]
     NumberOverflowsFloat64 { literal: String, at: usize },
     #[error("number `{literal}` at byte {at} underflows to zero")]
@@ -321,6 +414,28 @@ impl<'a> P<'a> {
             Some(b'n') => {
                 self.lit(b"null")?;
                 Ok(Json::Null)
+            }
+            // Fix round 1, C4: `NaN`/`Infinity`/`-Infinity` are not JSON
+            // number literals — RFC 8259 §6 has no such tokens — so this is
+            // handled here, at the same level as `true`/`false`/`null`, and
+            // never reaches `number()`/`classify_number` at all. Gated on
+            // `NonFiniteLiteralPolicy`, which only `Config::python_json()`
+            // sets to `Accept`.
+            Some(b'N') if self.cfg.non_finite == NonFiniteLiteralPolicy::Accept => {
+                self.lit(b"NaN")?;
+                Ok(Json::Number(Num::Float(f64::NAN)))
+            }
+            Some(b'I') if self.cfg.non_finite == NonFiniteLiteralPolicy::Accept => {
+                self.lit(b"Infinity")?;
+                Ok(Json::Number(Num::Float(f64::INFINITY)))
+            }
+            Some(b'-')
+                if self.cfg.non_finite == NonFiniteLiteralPolicy::Accept
+                    && self.b[self.i + 1..].starts_with(b"Infinity") =>
+            {
+                self.i += 1;
+                self.lit(b"Infinity")?;
+                Ok(Json::Number(Num::Float(f64::NEG_INFINITY)))
             }
             Some(c) if c == b'-' || c.is_ascii_digit() => self.number(),
             Some(_) => Err(self.syntax("unexpected character")),
@@ -506,10 +621,25 @@ impl<'a> P<'a> {
             if self.b[self.i..].starts_with(b"\\u") {
                 let save = self.i;
                 self.i += 2;
-                let lo = self.hex4()?;
-                if (0xDC00..0xE000).contains(&lo) {
+                let second = self.hex4()?;
+                if (0xDC00..0xE000).contains(&second) {
                     // A well-formed pair can still encode a noncharacter:
                     // 􏿿 is U+10FFFF.
+                    let cp = 0x10000 + (((hi as u32) - 0xD800) << 10) + ((second as u32) - 0xDC00);
+                    self.reject_noncharacter(cp, at)?;
+                    out.push(hi);
+                    out.push(second);
+                    return Ok(());
+                }
+                // `second` is a `\u` escape, but not a valid low surrogate.
+                // Every policy except Ruby's rewinds and treats `hi` as
+                // lone. Fix round 1, C3: measured, Ruby does not — it pairs
+                // regardless, masking both halves with 0x3FF with no range
+                // validation on `second` at all. See
+                // `SurrogatePolicy::RubyPairAnyEscape`'s doc comment for the
+                // measured evidence (`"\ud800\udbff"` -> U+103FF, etc).
+                if self.cfg.surrogates == SurrogatePolicy::RubyPairAnyEscape {
+                    let lo = 0xDC00 + (second & 0x03FF);
                     let cp = 0x10000 + (((hi as u32) - 0xD800) << 10) + ((lo as u32) - 0xDC00);
                     self.reject_noncharacter(cp, at)?;
                     out.push(hi);
@@ -550,6 +680,20 @@ impl<'a> P<'a> {
             SurrogatePolicy::Retain => {
                 out.push(cp as u16);
                 Ok(())
+            }
+            // Fix round 1, C3: measured asymmetry. `cp` in 0xD800..0xDC00
+            // only reaches `lone` when no `\u` escape followed it at all
+            // (`unicode_escape` handles the paired-with-any-escape case
+            // itself before ever calling `lone`), and Ruby rejects that —
+            // `incomplete surrogate pair`. `cp` in 0xDC00..0xE000 is a lone
+            // low surrogate, which Ruby accepts and retains verbatim.
+            SurrogatePolicy::RubyPairAnyEscape => {
+                if (0xD800..0xDC00).contains(&cp) {
+                    Err(JsonError::LoneSurrogate { cp, at })
+                } else {
+                    out.push(cp as u16);
+                    Ok(())
+                }
             }
         }
     }
@@ -606,27 +750,29 @@ impl<'a> P<'a> {
                 at,
             })
         };
+        // `OverflowPolicy` is orthogonal to `NumberPolicy` (see its doc
+        // comment) — Go and Elixir both reject a literal that overflows to
+        // an infinity, but arrive via different `NumberPolicy` branches
+        // below, so the check is one shared closure rather than duplicated
+        // in each.
+        let overflow_checked = |f: f64| -> Result<f64, JsonError> {
+            if self.cfg.overflow == OverflowPolicy::Reject && !f.is_finite() {
+                Err(JsonError::NumberOverflowsFloat64 {
+                    literal: lit.into(),
+                    at,
+                })
+            } else {
+                Ok(f)
+            }
+        };
         match self.cfg.numbers {
-            NumberPolicy::Ieee754Double => Ok(Json::Number(Num::Float(as_f64()?))),
-
-            // Task 4 correction, measured against the real `go` binary: a
-            // literal whose magnitude overflows a double's finite range is
-            // an error here, not a silent Infinity — see the variant's doc
-            // comment for the measured evidence.
-            NumberPolicy::Ieee754DoubleFinite => {
-                let f = as_f64()?;
-                if !f.is_finite() {
-                    return Err(JsonError::NumberOverflowsFloat64 {
-                        literal: lit.into(),
-                        at,
-                    });
-                }
-                Ok(Json::Number(Num::Float(f)))
+            NumberPolicy::Ieee754Double => {
+                Ok(Json::Number(Num::Float(overflow_checked(as_f64()?)?)))
             }
 
             NumberPolicy::ArbitraryPrecision => {
                 if fractional {
-                    return Ok(Json::Number(Num::Float(as_f64()?)));
+                    return Ok(Json::Number(Num::Float(overflow_checked(as_f64()?)?)));
                 }
                 // i128 is this crate's honest ceiling for "exact"; a literal
                 // beyond it is reported rather than quietly rounded.
@@ -795,6 +941,12 @@ mod tests {
                 Config::strict(),
                 Config::go_encoding_json(),
                 Config::node_json_parse(),
+                // Ruby's pairing logic is genuinely different code (see
+                // `SurrogatePolicy::RubyPairAnyEscape`), so a *bona fide*
+                // well-formed pair needs to be pinned there too, or that
+                // branch could regress and only the escape-masking tests
+                // below would ever exercise `unicode_escape` for Ruby.
+                Config::ruby_json(),
             ] {
                 let j = parse(src, cfg).unwrap();
                 assert_eq!(
@@ -818,6 +970,159 @@ mod tests {
         let src = "{\"a\":\"\\ud800\\u0041\"}";
         let j = parse(src, Config::node_json_parse()).unwrap();
         assert_eq!(j.get("a"), Some(&Json::String(vec![0xD800, 0x0041])));
+    }
+
+    #[test]
+    fn ruby_accepts_a_lone_low_surrogate_but_rejects_a_lone_high_one() {
+        // Fix round 1, C3: measured against the real `ruby` binary (json
+        // gem 2.1.0 on Ruby 2.6.10). Ruby's surrogate handling is
+        // genuinely asymmetric between the two bands, unlike every other
+        // config's uniform Reject/Replace/Retain.
+        let hi_src = r#"{"a":"\ud800"}"#;
+        assert!(
+            matches!(
+                parse(hi_src, Config::ruby_json()).unwrap_err(),
+                JsonError::LoneSurrogate { cp: 0xD800, .. }
+            ),
+            "a lone high surrogate is rejected -- `incomplete surrogate pair`, measured"
+        );
+
+        let lo_src = r#"{"a":"\udc00"}"#;
+        let v = parse(lo_src, Config::ruby_json()).unwrap();
+        assert_eq!(
+            v.get("a"),
+            Some(&Json::String(vec![0xDC00])),
+            "a lone low surrogate is accepted and retained verbatim -- measured as \
+             the WTF-8-ish bytes `ed b0 80`, i.e. this code unit once rendered"
+        );
+    }
+
+    #[test]
+    fn ruby_pairs_a_high_surrogate_with_any_escape_but_not_a_raw_character() {
+        // Fix round 1, C3: measured. Node keeps a high-surrogate escape
+        // followed by an escape naming plain U+0041 as two separate units
+        // (see `a_high_surrogate_followed_by_an_unrelated_escape_keeps_both`
+        // above) because 0x0041 is not a valid low surrogate. Ruby instead
+        // combines the two regardless of validity, masking both halves
+        // with `0x3FF` -- the same source below parses to U+10041 under
+        // Ruby, and the character the escape named is never emitted on its
+        // own.
+        let src = "{\"a\":\"\\ud800\\u0041\"}";
+        let v = parse(src, Config::ruby_json()).unwrap();
+        assert_eq!(
+            v.get("a"),
+            Some(&Json::String(vec![0xD800, 0xDC41])),
+            "U+10041, not two separate units the way Node keeps it"
+        );
+
+        // The second escape need not even be a low surrogate -- a second
+        // *high* surrogate escape is paired by the identical formula.
+        let src2 = "{\"a\":\"\\ud800\\udbff\"}";
+        let v2 = parse(src2, Config::ruby_json()).unwrap();
+        assert_eq!(
+            v2.get("a"),
+            Some(&Json::String(vec![0xD800, 0xDFFF])),
+            "U+103FF, from masking 0xDBFF with 0x3FF the same as any other escape"
+        );
+
+        // But a high surrogate followed by a raw, unescaped character
+        // (rather than a second `\u` escape) is not paired at all -- it is
+        // rejected, the same as a lone high surrogate with nothing
+        // following. Measured directly; an earlier draft of this
+        // correction wrongly assumed a raw character paired too.
+        let raw_src = r#"{"a":"\ud800A"}"#;
+        assert!(
+            matches!(
+                parse(raw_src, Config::ruby_json()).unwrap_err(),
+                JsonError::LoneSurrogate { cp: 0xD800, .. }
+            ),
+            "a raw character does not pair -- measured, only a second \\u escape does"
+        );
+    }
+
+    #[test]
+    fn python_accepts_the_non_standard_nan_and_infinity_tokens() {
+        // Fix round 1, C4: measured against the real `python3` binary.
+        // `json.loads`'s `allow_nan` defaults to true, so these bare
+        // (non-RFC-8259) tokens are accepted -- the only one of the four
+        // modelled runtimes that does.
+        let nan = parse(r#"{"n":NaN}"#, Config::python_json()).unwrap();
+        let Some(Json::Number(Num::Float(f))) = nan.get("n") else {
+            panic!("expected a float")
+        };
+        assert!(f.is_nan());
+
+        assert_eq!(
+            parse(r#"{"n":Infinity}"#, Config::python_json())
+                .unwrap()
+                .get("n"),
+            Some(&Json::Number(Num::Float(f64::INFINITY)))
+        );
+        assert_eq!(
+            parse(r#"{"n":-Infinity}"#, Config::python_json())
+                .unwrap()
+                .get("n"),
+            Some(&Json::Number(Num::Float(f64::NEG_INFINITY)))
+        );
+
+        // Every other config rejects all three -- these are not JSON
+        // number literals under RFC 8259 section 6.
+        for cfg in [
+            Config::strict(),
+            Config::go_encoding_json(),
+            Config::node_json_parse(),
+            Config::ruby_json(),
+            Config::elixir_otp_json(),
+        ] {
+            for bad in [r#"{"n":NaN}"#, r#"{"n":Infinity}"#, r#"{"n":-Infinity}"#] {
+                assert!(parse(bad, cfg).is_err(), "{cfg:?} must reject {bad:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn elixir_rejects_overflow_but_keeps_arbitrary_precision_integers() {
+        // Fix round 1, C6: measured on GCP, results/elixir-measurement.txt.
+        // `Config::elixir_otp_json()` combines `ArbitraryPrecision` (exact
+        // integers survive, unlike Go) with `OverflowPolicy::Reject` (an
+        // overflowing literal errors, unlike Python and Ruby) -- a
+        // combination no single `NumberPolicy` variant expresses alone,
+        // which is why overflow is its own orthogonal knob.
+        assert!(
+            matches!(
+                parse(r#"{"n":1e400}"#, Config::elixir_otp_json()).unwrap_err(),
+                JsonError::NumberOverflowsFloat64 { .. }
+            ),
+            "real :json rejects 1e400 with {{:unexpected_sequence, \"1.0e400\"}}"
+        );
+        assert_eq!(
+            parse(r#"{"n":9007199254740993}"#, Config::elixir_otp_json())
+                .unwrap()
+                .get("n"),
+            Some(&Json::Number(Num::Int(9_007_199_254_740_993))),
+            "integers stay exact, measured"
+        );
+
+        // Negative zero and underflow are both accepted silently, also
+        // measured, and were already correct before this fix round --
+        // pinned here so a future change to overflow handling cannot
+        // regress them unnoticed.
+        let neg_zero = parse(r#"{"n":-0.0}"#, Config::elixir_otp_json()).unwrap();
+        let Some(Json::Number(Num::Float(f))) = neg_zero.get("n") else {
+            panic!("expected a float")
+        };
+        assert_eq!(*f, 0.0);
+        assert!(
+            f.is_sign_negative(),
+            "sign preserved, measured F:8000000000000000"
+        );
+
+        let underflow = parse(r#"{"n":1e-400}"#, Config::elixir_otp_json()).unwrap();
+        assert_eq!(
+            underflow.get("n"),
+            Some(&Json::Number(Num::Float(0.0))),
+            "underflows silently rather than erroring, measured"
+        );
     }
 
     #[test]

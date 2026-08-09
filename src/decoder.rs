@@ -37,9 +37,24 @@ pub enum Provenance {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum ModelVerification {
-    /// The modelled runtime is installed here and agreed with the model on
-    /// the whole corpus. See `tests/model_fidelity.rs`.
-    CrossChecked,
+    /// The modelled runtime is installed on this host — nothing more. This
+    /// is presence, not agreement: `modelled()` awards it purely from
+    /// `present.iter().any(...)`, so a model can carry `RuntimeInstalled`
+    /// while still disagreeing with the runtime it claims to model.
+    /// Agreement is a separate, falsifiable claim made only by
+    /// `tests/model_fidelity.rs` actually running the corpus against the
+    /// runtime — this label must never be read as asserting it.
+    ///
+    /// Fix round 1, C5: this variant was previously named `CrossChecked`
+    /// and documented as "installed here and agreed with the model on the
+    /// whole corpus," a claim this crate had no way to back up at the point
+    /// the label is produced. Measured directly on this host: all four
+    /// runtimes reported that stronger label while two of the four models
+    /// (Python, Ruby) demonstrably disagreed with their runtimes — a false
+    /// provenance claim from the one tool whose entire purpose is not to
+    /// make those. Renamed rather than patched, so the label can no longer
+    /// be misread as a correctness guarantee.
+    RuntimeInstalled,
     /// The runtime is not installed here, so this behaviour is a claim taken
     /// from documentation — the kind of claim this tool exists to distrust.
     Unverified { why: String },
@@ -263,13 +278,16 @@ fn cfg_decoder(id: &str, provenance: Provenance, cfg: Config) -> InCrateDecoder 
     }
 }
 
-/// `CrossChecked` is **derived**, never asserted.
+/// `RuntimeInstalled` is **derived**, never asserted.
 ///
-/// A hard-coded `CrossChecked` would have this crate report all four models
-/// as verified on a host with no Go, Node, Python or Ruby installed — an
-/// unverified claim presented as a measurement, which is precisely the
+/// A hard-coded `RuntimeInstalled` would have this crate report all four
+/// models as installed on a host with no Go, Node, Python or Ruby installed —
+/// an unverified claim presented as a measurement, which is precisely the
 /// failure this tool exists to expose. `runtime` names the discovery id that
-/// has to be present for the claim to hold.
+/// has to be present for the label to hold. Note what this label does *not*
+/// claim: agreement with the runtime. That is `tests/model_fidelity.rs`'s
+/// job, not this function's — see `ModelVerification::RuntimeInstalled`'s
+/// doc comment.
 fn modelled(
     id: &str,
     models: &str,
@@ -278,7 +296,7 @@ fn modelled(
     cfg: Config,
 ) -> InCrateDecoder {
     let verification = if present.iter().any(|p| p == runtime) {
-        ModelVerification::CrossChecked
+        ModelVerification::RuntimeInstalled
     } else {
         ModelVerification::Unverified {
             why: format!(
@@ -604,11 +622,11 @@ mod tests {
     }
 
     #[test]
-    fn cross_checked_is_derived_from_discovery_not_asserted() {
+    fn runtime_installed_is_derived_from_discovery_not_asserted() {
         // The mutation that matters: with no runtimes found, *every* model
-        // must report itself unverified. A hard-coded `CrossChecked` passes
-        // any test that only reads the shipped labels, and would have this
-        // crate claim measurements it never made.
+        // must report itself unverified. A hard-coded `RuntimeInstalled`
+        // passes any test that only reads the shipped labels, and would
+        // have this crate claim measurements it never made.
         for d in in_crate_verified_against(&[]) {
             if let Provenance::Modelled { verification, .. } = &d.provenance {
                 assert!(
@@ -637,7 +655,7 @@ mod tests {
         let ds = in_crate_verified_against(&["go".to_string()]);
         assert_eq!(
             verification_of(&ds, "model:go-encoding-json"),
-            ModelVerification::CrossChecked
+            ModelVerification::RuntimeInstalled
         );
         assert!(matches!(
             verification_of(&ds, "model:node-json-parse"),
@@ -646,10 +664,12 @@ mod tests {
     }
 
     #[test]
-    fn the_elixir_model_can_never_be_cross_checked_here() {
-        // There is no Elixir candidate in `external::EXPECTED`, so no
-        // discovery result can promote it. Its label is a claim from
-        // documentation and must stay one.
+    fn the_elixir_model_can_never_report_runtime_installed_here() {
+        // There is no Elixir candidate in `external::EXPECTED`, so no local
+        // discovery result can promote it -- the out-of-band GCP
+        // measurement in `results/elixir-measurement.txt` is not wired
+        // into this crate's automatic provenance and does not change that.
+        // Its label is a claim from documentation and must stay one.
         for present in [vec![], vec!["go".to_string(), "node".to_string()]] {
             let ds = in_crate_verified_against(&present);
             assert!(matches!(

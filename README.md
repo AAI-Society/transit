@@ -185,14 +185,26 @@ B. Divergences reported between language runtimes are *measured*, by executing
 those runtimes on the host that ran them.
 
 **Modelled.** Five configurations model production decoders. Four (Go, Node,
-Python, Ruby) are cross-checked against the real runtime whenever it is
-installed, and a test fails if a model and its runtime disagree. **The Elixir
-model is not cross-checked** — no Elixir runtime is installed here, so its
-behaviour is a claim taken from documentation, and it is labelled `Unverified`
-everywhere it appears. That label is *derived* from what discovery actually
-found, never hard-coded: on a machine with none of them installed, every model
-reports itself unverified. A tool claiming measurements it never made would be
-committing the exact error it exists to expose.
+Python, Ruby) report `RuntimeInstalled` in their provenance whenever the real
+runtime is found on this host — and that label means exactly what it says and
+no more: the runtime is *present*, not that it *agrees*. Agreement is a
+separate, falsifiable claim that only `tests/model_fidelity.rs` makes, by
+actually running the shared corpus against the runtime and failing if a model
+and its runtime disagree; the label itself is derived purely from discovery
+(`present.iter().any(...)`) and cannot see that test's result. (An earlier
+name for this label, `CrossChecked`, claimed agreement it had no way to know
+at the point it was produced — renamed after a fix round measured two of the
+four models disagreeing with their runtime while both still carried it.)
+**The Elixir model carries no such label at all** — no Elixir runtime is
+installed on this host, so `Config::elixir_otp_json()` is labelled
+`Unverified` everywhere it appears in this crate, even though it has in fact
+been measured out-of-band, once, on GCP (`results/elixir-measurement.txt`);
+that measurement is not wired into the crate's automatic provenance, so the
+in-crate label stays conservative regardless. Every label here is *derived*
+from what discovery actually found, never hard-coded: on a machine with none
+of the four installed, every model reports itself unverified. A tool claiming
+measurements it never made would be committing the exact error it exists to
+expose.
 
 **Hypothesis, not data.** The 24-endpoint survey is a documentation review.
 Every row is tagged `DeskStudy`, no code path can promote a row to `LiveProbed`

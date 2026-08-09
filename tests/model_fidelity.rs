@@ -7,7 +7,7 @@
 //! add an exception: the whole value of the model is that it was checked.
 
 use transit::corpus;
-use transit::decoder::{in_crate, Observation};
+use transit::decoder::in_crate;
 use transit::external::discover;
 
 fn model_for(runtime: &str) -> &'static str {
