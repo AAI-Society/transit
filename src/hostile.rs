@@ -127,6 +127,11 @@ pub struct Transfer {
     pub fee_tier: String,
 }
 
+/// Fix round 1, C1: every field here is reachable from `GET /v1/state`
+/// through `#[derive(Serialize)]`, `used_nonces` and `orders_idempotency`
+/// included. That is deliberate harness observability — Tasks 8 and 9 need
+/// to see the capability and idempotency state a fuzzed request produced,
+/// not just the business ledger — and not an oversight to `#[serde(skip)]`.
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct Ledger {
     pub version: u64,
@@ -143,7 +148,17 @@ pub struct Ledger {
     idempotency: BTreeMap<String, (String, String)>,
     /// The business idempotency key for `/v1/orders`, deliberately separate
     /// from `used_nonces`. Keeping them apart is the whole of C3.
-    orders_idempotency: BTreeMap<String, String>,
+    ///
+    /// Fix round 1, C1: `(canonical request digest, order id)`, the same
+    /// shape as `idempotency` above and for the same reason — a cache keyed
+    /// on the header alone let one key return another request's order:
+    /// `POST /v1/orders` with `{"sku":"A"}` under `Idempotency-Key: k1`,
+    /// then a second, distinct order under the same key, replayed the
+    /// first order's id while the client was told the second succeeded. Two
+    /// orders were meant, one was created, and the ledger disagreed with
+    /// the client about it — inside the configuration this crate calls
+    /// conforming.
+    orders_idempotency: BTreeMap<String, (String, String)>,
 }
 
 impl Ledger {
@@ -166,6 +181,59 @@ impl Request {
             .iter()
             .find(|(k, _)| k.eq_ignore_ascii_case(name))
             .map(|(_, v)| v.as_str())
+    }
+}
+
+/// Resolve a header that the client may have sent more than once, under the
+/// same duplicate policy `decoder()` applies to the body.
+///
+/// Fix round 1, I7: `Request::header` took the first match with no stated
+/// policy at all — `Idempotency-Key: k1` followed by `Idempotency-Key: k2`
+/// silently used `k1`, undefined behaviour on the exact header this
+/// endpoint's write routes treat as the client's one word on identity. For
+/// a fixture whose entire subject is which duplicate a decoder resolves to,
+/// and which `transit guard` sits in front of and may resolve differently,
+/// that is a guard/upstream desync waiting to happen. Only `Idempotency-Key`
+/// and `If-Match` go through this; `Authorization` still uses the plain
+/// first-match `header()` above.
+fn resolved_header(
+    req: &Request,
+    name: &str,
+    modes: &FailureModes,
+) -> Result<Option<String>, Response> {
+    let matches: Vec<&str> = req
+        .headers
+        .iter()
+        .filter(|(k, _)| k.eq_ignore_ascii_case(name))
+        .map(|(_, v)| v.as_str())
+        .collect();
+    if modes.lenient_decoder {
+        // Matches the lenient body decoder's `DuplicatePolicy::LastWins`.
+        Ok(matches.last().map(|s| s.to_string()))
+    } else if matches.len() > 1 {
+        // Matches the strict body decoder's `DuplicatePolicy::Reject`.
+        Err(json_err(400, &format!("duplicate header `{name}`")))
+    } else {
+        Ok(matches.first().map(|s| s.to_string()))
+    }
+}
+
+/// Format an `f64` for interpolation into a response body, never emitting
+/// Rust's `inf`/`NaN`/`-inf` spellings, none of which are valid JSON.
+///
+/// Fix round 1, minor: unreachable today, because both configurations this
+/// endpoint ever decodes with (`Config::go_encoding_json()` and
+/// `Config::strict()`) reject a literal that overflows a 64-bit float at
+/// parse time — see `OverflowPolicy`. Guarded anyway, on the same principle
+/// as `quote`: a value this endpoint interpolates into its own response is
+/// payload-controlled, and "unreachable under the two configs wired up
+/// today" is not a proof for a function with no such qualifier in its
+/// signature.
+fn json_number(f: f64) -> String {
+    if f.is_finite() {
+        f.to_string()
+    } else {
+        "null".to_string()
     }
 }
 
@@ -293,7 +361,10 @@ fn transfer(modes: &FailureModes, state: &mut Ledger, req: &Request) -> Response
     // has no UTF-8 form), and `unwrap_or_default()` would make every such
     // request share one cache key.
     let req_digest = crate::jcs::digest(&body).unwrap_or_else(|_| format!("raw:{}", req.body));
-    let key = req.header("Idempotency-Key").map(str::to_string);
+    let key = match resolved_header(req, "Idempotency-Key", modes) {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
     if !modes.non_idempotent {
         let Some(k) = key.clone() else {
             return json_err(400, "this endpoint requires an Idempotency-Key");
@@ -311,7 +382,11 @@ fn transfer(modes: &FailureModes, state: &mut Ledger, req: &Request) -> Response
 
     // C4, for a cache miss — a request that has not executed before.
     if !modes.no_state_pinning {
-        match req.header("If-Match") {
+        let if_match = match resolved_header(req, "If-Match", modes) {
+            Ok(v) => v,
+            Err(e) => return e,
+        };
+        match if_match.as_deref() {
             None => return json_err(428, "this endpoint requires an If-Match precondition"),
             Some(tag) if tag != state.etag() => {
                 return json_err(412, "state has moved since the request was signed")
@@ -329,7 +404,7 @@ fn transfer(modes: &FailureModes, state: &mut Ledger, req: &Request) -> Response
     let body = format!(
         r#"{{"executed":{{"to":{},"amount":{},"fee_tier":{}}},"state_version":{},"transfer_count":{}}}"#,
         quote(&to),
-        amount,
+        json_number(amount),
         quote(&fee_tier),
         state.version,
         state.transfers.len()
@@ -352,6 +427,17 @@ fn order(modes: &FailureModes, state: &mut Ledger, req: &Request) -> Response {
         return json_err(401, "no capability nonce");
     }
 
+    // Fix round 1, C1/finding 8: this route used to never read `req.body`
+    // at all, so `boundable` ingested it with no strict decoder — a
+    // duplicate-keyed or otherwise malformed body returned 200 under every
+    // mode, and `lenient_decoder` had no observable effect on this route.
+    // Parsed with the same decoder `transfer()` uses, for the same reason.
+    let body = match parse(&req.body, modes.decoder()) {
+        Ok(v) => v,
+        Err(e) => return json_err(400, &e.to_string()),
+    };
+    let req_digest = crate::jcs::digest(&body).unwrap_or_else(|_| format!("raw:{}", req.body));
+
     // The nonce is checked first and the commit follows, which is the real
     // ordering. The ambiguity does not come from checking late: it comes from
     // the *first* call having already committed by the time the retry arrives,
@@ -360,7 +446,6 @@ fn order(modes: &FailureModes, state: &mut Ledger, req: &Request) -> Response {
     if state.used_nonces.iter().any(|n| n == &nonce) {
         return json_err(409, "nonce already used; this looks like a replay");
     }
-    state.used_nonces.push(nonce);
 
     // A boundable endpoint has a business idempotency key **distinct from the
     // authorization nonce**, so a retry with a fresh nonce resolves to the
@@ -373,12 +458,34 @@ fn order(modes: &FailureModes, state: &mut Ledger, req: &Request) -> Response {
     // Task 9's proof that decoupling the key from the nonce removes the retry
     // ambiguity was satisfied by a constant rather than by a mechanism.
     // Deleting that branch left all eleven tests green.
-    let key = req.header("Idempotency-Key").map(str::to_string);
+    let key = match resolved_header(req, "Idempotency-Key", modes) {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+
     if !modes.non_idempotent {
-        let Some(k) = key.clone() else {
+        let Some(k) = key else {
             return json_err(400, "this endpoint requires an Idempotency-Key");
         };
-        if let Some(existing) = state.orders_idempotency.get(&k) {
+
+        // Fix round 1, I2: committed here, not before the key check above.
+        // The push used to happen unconditionally right after the replay
+        // check, so a request rejected for a missing key still burned the
+        // nonce — leaving a corrected retry on the same nonce refused as a
+        // replay of a request that never executed. That is exactly the
+        // "did it happen?" ambiguity C3 exists to eliminate, reintroduced
+        // by the harness meant to demonstrate its absence.
+        state.used_nonces.push(nonce);
+
+        // Fix round 1, C1: the digest binds the cache entry to *this*
+        // request, the same way `transfer`'s idempotency cache does. Keyed
+        // on the header alone, a client reusing a key for a genuinely
+        // different order was handed the first order's id while told the
+        // second one — with different contents — had succeeded.
+        if let Some((seen_digest, existing)) = state.orders_idempotency.get(&k) {
+            if seen_digest != &req_digest {
+                return json_err(422, "this Idempotency-Key was used for a different request");
+            }
             return Response {
                 status: 200,
                 body: format!(
@@ -388,14 +495,25 @@ fn order(modes: &FailureModes, state: &mut Ledger, req: &Request) -> Response {
                 ),
             };
         }
+
+        let id = format!("ord-{}", state.orders.len() + 1);
+        state.orders_idempotency.insert(k, (req_digest, id.clone()));
+        state.orders.push(id.clone());
+        state.version += 1;
+        return Response {
+            status: 200,
+            body: format!(
+                r#"{{"order_id":{},"state_version":{},"order_count":{}}}"#,
+                quote(&id),
+                state.version,
+                state.orders.len()
+            ),
+        };
     }
 
+    // `non_idempotent`: execute unconditionally, no key required.
+    state.used_nonces.push(nonce);
     let id = format!("ord-{}", state.orders.len() + 1);
-    if !modes.non_idempotent {
-        if let Some(k) = key {
-            state.orders_idempotency.insert(k, id.clone());
-        }
-    }
     state.orders.push(id.clone());
     state.version += 1;
     Response {
@@ -760,6 +878,30 @@ mod tests {
             "every scenario above is listed for the CLI"
         );
         assert!(FailureModes::named("wishful").is_err());
+
+        // Fix round 1, I4: the assertions above call `named()` with seven
+        // hardcoded literals, so a name misspelled in `SCENARIOS` itself —
+        // the list `ScenarioError` prints and Tasks 10/15 iterate — was
+        // never compared against them and passed every test. Iterate the
+        // list directly, and require the seven to be pairwise distinct: a
+        // scenario that silently resolved to another's modes would pass a
+        // `len() == 7` check just as easily as a misspelling would.
+        let resolved: Vec<FailureModes> = SCENARIOS
+            .iter()
+            .map(|name| {
+                FailureModes::named(name)
+                    .unwrap_or_else(|e| panic!("`{name}` is in SCENARIOS but doesn't resolve: {e}"))
+            })
+            .collect();
+        for i in 0..resolved.len() {
+            for j in (i + 1)..resolved.len() {
+                assert_ne!(
+                    resolved[i], resolved[j],
+                    "`{}` and `{}` resolve to the same modes",
+                    SCENARIOS[i], SCENARIOS[j]
+                );
+            }
+        }
     }
 
     #[test]
@@ -888,7 +1030,428 @@ mod tests {
 
     #[test]
     fn the_endpoint_refuses_to_bind_anything_but_loopback() {
-        assert!(serve("0.0.0.0:0", FailureModes::boundable()).is_err());
-        assert!(serve("[::]:0", FailureModes::boundable()).is_err());
+        // Fix round 1, minor: asserting only `is_err()` would still pass a
+        // reordering that binds *then* refuses — the message is the only
+        // thing that pins "refused before any socket was touched."
+        let e1 = serve("0.0.0.0:0", FailureModes::boundable()).unwrap_err();
+        assert!(e1.to_string().contains("refusing to bind"), "{e1}");
+        let e2 = serve("[::]:0", FailureModes::boundable()).unwrap_err();
+        assert!(e2.to_string().contains("refusing to bind"), "{e2}");
+    }
+
+    // ---- Fix round 1 ----
+
+    #[test]
+    fn an_order_idempotency_key_is_bound_to_the_request_that_used_it() {
+        // C1. Same key, different body: the endpoint must refuse rather
+        // than hand back the first order's id for a second, distinct
+        // order. `orders_idempotency` used to be keyed on the header
+        // alone, so this replayed `ord-1` and reported success for an
+        // order that was never created.
+        let mut l = Ledger::default();
+        let modes = FailureModes::boundable();
+        let a = handle(
+            &modes,
+            &mut l,
+            &post(
+                "/v1/orders",
+                r#"{"sku":"A","qty":1}"#,
+                &[
+                    ("Authorization", "Capability nonce=n1"),
+                    ("Idempotency-Key", "k1"),
+                ],
+            ),
+        );
+        assert_eq!(a.status, 200, "{}", a.body);
+        let b = handle(
+            &modes,
+            &mut l,
+            &post(
+                "/v1/orders",
+                r#"{"sku":"B","qty":9999}"#,
+                &[
+                    ("Authorization", "Capability nonce=n2"),
+                    ("Idempotency-Key", "k1"),
+                ],
+            ),
+        );
+        assert_eq!(
+            b.status, 422,
+            "a key bound to another request must not replay it"
+        );
+        assert_eq!(l.orders.len(), 1, "only the first order was ever created");
+    }
+
+    #[test]
+    fn orders_are_ingested_with_the_configured_decoder_too() {
+        // Finding 8. `order()` used to never read `req.body`, so
+        // `boundable` ingested this write route with no strict decoder at
+        // all, and `lenient_decoder` had no observable effect on it:
+        // `{"qty":1,"qty":2}` returned 200 under every mode.
+        let mut l = Ledger::default();
+        let r = handle(
+            &FailureModes::boundable(),
+            &mut l,
+            &post(
+                "/v1/orders",
+                r#"{"qty":1,"qty":2}"#,
+                &[
+                    ("Authorization", "Capability nonce=n1"),
+                    ("Idempotency-Key", "k1"),
+                ],
+            ),
+        );
+        assert_eq!(r.status, 400, "{}", r.body);
+        assert!(r.body.contains("duplicate"), "{}", r.body);
+        assert!(l.orders.is_empty());
+
+        let mut l2 = Ledger::default();
+        let r2 = handle(
+            &FailureModes::all_hostile(),
+            &mut l2,
+            &post(
+                "/v1/orders",
+                r#"{"qty":1,"qty":2}"#,
+                &[("Authorization", "Capability nonce=n1")],
+            ),
+        );
+        assert_eq!(r2.status, 200, "{}", r2.body);
+    }
+
+    #[test]
+    fn a_rejected_order_does_not_burn_the_capability_nonce() {
+        // I2. The nonce used to be marked used before the missing-key
+        // check, so a request that executed nothing still consumed it —
+        // and the corrected retry, on the same nonce, was refused as a
+        // replay of a request that never happened.
+        let mut l = Ledger::default();
+        let modes = FailureModes::boundable();
+        let rejected = handle(
+            &modes,
+            &mut l,
+            &post(
+                "/v1/orders",
+                "{}",
+                &[("Authorization", "Capability nonce=n1")],
+            ),
+        );
+        assert_eq!(rejected.status, 400, "{}", rejected.body);
+        assert!(l.orders.is_empty());
+
+        let retried = handle(
+            &modes,
+            &mut l,
+            &post(
+                "/v1/orders",
+                "{}",
+                &[
+                    ("Authorization", "Capability nonce=n1"),
+                    ("Idempotency-Key", "k1"),
+                ],
+            ),
+        );
+        assert_eq!(
+            retried.status, 200,
+            "the nonce must still be usable after a request that did nothing: {}",
+            retried.body
+        );
+        assert_eq!(l.orders.len(), 1);
+    }
+
+    /// Exercises each of the five modes independently through `handle`, so
+    /// a scenario is checked by what it *does*, not merely by the
+    /// `FailureModes` value it resolves to. Returns, in field order,
+    /// whether each mode's hostile behaviour was actually observed.
+    ///
+    /// I3. Two mutations passed all eighteen tests that existed before this
+    /// one: swapping the `!modes.non_idempotent`/`!modes.no_state_pinning`
+    /// guards (and the cache-insert alongside them), and substituting
+    /// `modes.profile_defaults` for `modes.uri_aliasing` at the alias site
+    /// inside `transfer`. Both compile, and both leave every previous
+    /// assertion true, because only `all_hostile()` (every field `true`)
+    /// and `boundable()` (every field `false`) were ever driven through
+    /// `handle` — so swapping two `true`s or two `false`s changes nothing
+    /// observable. The five single-mode scenarios were asserted only for
+    /// field equality, never exercised.
+    fn observed_hostile_behaviour(modes: FailureModes) -> [bool; 5] {
+        // Duplicate keys: last-wins (the request succeeds) rather than a
+        // rejected duplicate.
+        let mut l = Ledger::default();
+        let r = handle(
+            &modes,
+            &mut l,
+            &post(
+                "/v1/transfer",
+                r#"{"to":"acct-1","amount":1,"to":"acct-9","fee_tier":"standard"}"#,
+                &[("Idempotency-Key", "dup"), ("If-Match", "0")],
+            ),
+        );
+        let lenient_decoder = r.status == 200;
+
+        // Profile defaults: an omitted `fee_tier` is filled in rather than
+        // refused.
+        let mut l = Ledger::default();
+        let r = handle(
+            &modes,
+            &mut l,
+            &post(
+                "/v1/transfer",
+                r#"{"to":"acct-9","amount":1}"#,
+                &[("Idempotency-Key", "def"), ("If-Match", "0")],
+            ),
+        );
+        let profile_defaults = r.status == 200;
+
+        // URI aliasing, checked at its actual site inside `transfer` (not
+        // only the dedicated `GET /v1/users/me` route, which the
+        // `profile_defaults`-for-`uri_aliasing` mutation above never
+        // touches): `to: "me"` resolves to the owner account.
+        let mut l = Ledger::default();
+        handle(
+            &modes,
+            &mut l,
+            &post(
+                "/v1/transfer",
+                r#"{"to":"me","amount":1,"fee_tier":"standard"}"#,
+                &[("Idempotency-Key", "alias"), ("If-Match", "0")],
+            ),
+        );
+        let uri_aliasing = l.transfers.first().map(|t| t.to.as_str()) == Some("acct-owner");
+
+        // Non-idempotent: the same key executes twice, each call pinned to
+        // the version it actually sees, so this isolates idempotency from
+        // state pinning rather than needing it disabled too.
+        let mut l = Ledger::default();
+        let body = r#"{"to":"acct-9","amount":1,"fee_tier":"standard"}"#;
+        handle(
+            &modes,
+            &mut l,
+            &post(
+                "/v1/transfer",
+                body,
+                &[("Idempotency-Key", "rep"), ("If-Match", "0")],
+            ),
+        );
+        let etag = l.etag();
+        handle(
+            &modes,
+            &mut l,
+            &post(
+                "/v1/transfer",
+                body,
+                &[("Idempotency-Key", "rep"), ("If-Match", &etag)],
+            ),
+        );
+        let non_idempotent = l.transfers.len() == 2;
+
+        // No state pinning: a request with no `If-Match` still executes.
+        let mut l = Ledger::default();
+        let r = handle(
+            &modes,
+            &mut l,
+            &post(
+                "/v1/transfer",
+                r#"{"to":"acct-9","amount":1,"fee_tier":"standard"}"#,
+                &[("Idempotency-Key", "pin")],
+            ),
+        );
+        let no_state_pinning = r.status == 200;
+
+        [
+            lenient_decoder,
+            profile_defaults,
+            uri_aliasing,
+            non_idempotent,
+            no_state_pinning,
+        ]
+    }
+
+    #[test]
+    fn every_scenario_produces_exactly_the_behaviour_its_modes_name() {
+        for name in SCENARIOS {
+            let modes = FailureModes::named(name).unwrap();
+            let observed = observed_hostile_behaviour(modes);
+            let expected = [
+                modes.lenient_decoder,
+                modes.profile_defaults,
+                modes.uri_aliasing,
+                modes.non_idempotent,
+                modes.no_state_pinning,
+            ];
+            assert_eq!(
+                observed, expected,
+                "scenario `{name}`: observed {observed:?}, modes name {expected:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn state_reports_the_ledger_as_json() {
+        // I5. `GET /v1/state` had zero coverage; Tasks 8 and 9 depend on it
+        // as the harness's only way to observe the ledger.
+        let mut l = Ledger::default();
+        handle(
+            &FailureModes::all_hostile(),
+            &mut l,
+            &post("/v1/transfer", r#"{"to":"acct-9","amount":1}"#, &[]),
+        );
+        let get = Request {
+            method: "GET".into(),
+            path: "/v1/state".into(),
+            headers: vec![],
+            body: String::new(),
+        };
+        let r = handle(&FailureModes::boundable(), &mut l, &get);
+        assert_eq!(r.status, 200, "{}", r.body);
+        let v: serde_json::Value = serde_json::from_str(&r.body).expect("valid JSON");
+        assert_eq!(v["transfers"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn reset_clears_the_ledger() {
+        // I5. `POST /v1/reset` had zero coverage; it is the harness's only
+        // way to start a scenario from a clean ledger.
+        let mut l = Ledger::default();
+        handle(
+            &FailureModes::all_hostile(),
+            &mut l,
+            &post("/v1/transfer", r#"{"to":"acct-9","amount":1}"#, &[]),
+        );
+        assert_eq!(l.transfers.len(), 1);
+        let reset = Request {
+            method: "POST".into(),
+            path: "/v1/reset".into(),
+            headers: vec![],
+            body: String::new(),
+        };
+        let r = handle(&FailureModes::boundable(), &mut l, &reset);
+        assert_eq!(r.status, 200, "{}", r.body);
+        assert!(l.transfers.is_empty());
+        assert_eq!(l.version, 0);
+    }
+
+    #[test]
+    fn the_canonical_identifier_resolves_regardless_of_aliasing() {
+        // I5. `GET /v1/users/usr_99812` had zero coverage — it is the
+        // identifier the alias resolves *to*, half of the aliasing
+        // demonstration, and deleting the route entirely passed every
+        // other test.
+        let mut l = Ledger::default();
+        let get = Request {
+            method: "GET".into(),
+            path: "/v1/users/usr_99812".into(),
+            headers: vec![],
+            body: String::new(),
+        };
+        for modes in [FailureModes::all_hostile(), FailureModes::boundable()] {
+            let r = handle(&modes, &mut l, &get);
+            assert_eq!(r.status, 200, "{}", r.body);
+            assert!(r.body.contains("usr_99812"));
+            assert!(r.body.contains("identifier"));
+        }
+    }
+
+    #[test]
+    fn header_lookup_is_case_insensitive() {
+        // I6. `serve` forwards whatever casing the client sent; every test
+        // above uses canonical casing, so a comparison that only matched
+        // canonical casing would break the served endpoint while the whole
+        // suite stayed green.
+        let mut l = Ledger::default();
+        let r = handle(
+            &FailureModes::boundable(),
+            &mut l,
+            &post(
+                "/v1/transfer",
+                r#"{"to":"acct-9","amount":1,"fee_tier":"standard"}"#,
+                &[("idempotency-key", "k1"), ("if-match", "0")],
+            ),
+        );
+        assert_eq!(r.status, 200, "{}", r.body);
+    }
+
+    #[test]
+    fn a_missing_precondition_is_specifically_428_not_merely_4xx() {
+        // I6. The only route to 428 is `Idempotency-Key` present,
+        // `If-Match` absent — every test above either supplies both
+        // headers or neither, so a mutation answering 400 here instead
+        // passed the whole suite. Task 8's `parameter_defaulting_bypass`
+        // is written against this exact status.
+        let mut l = Ledger::default();
+        let r = handle(
+            &FailureModes::boundable(),
+            &mut l,
+            &post(
+                "/v1/transfer",
+                r#"{"to":"acct-9","amount":1,"fee_tier":"standard"}"#,
+                &[("Idempotency-Key", "k1")],
+            ),
+        );
+        assert_eq!(r.status, 428, "{}", r.body);
+    }
+
+    #[test]
+    fn boundable_mode_rejects_a_duplicated_precondition_header() {
+        // I7. `Request::header` took the first match with no stated
+        // policy, so `Idempotency-Key: k1` followed by `Idempotency-Key:
+        // k2` silently used `k1` — undefined behaviour on the exact header
+        // `transit guard` sits in front of and may resolve differently.
+        // Pinned to match the body decoder: strict rejects a duplicate,
+        // consistent with `DuplicatePolicy::Reject`.
+        let mut l = Ledger::default();
+        let r = handle(
+            &FailureModes::boundable(),
+            &mut l,
+            &post(
+                "/v1/transfer",
+                r#"{"to":"acct-9","amount":1,"fee_tier":"standard"}"#,
+                &[
+                    ("Idempotency-Key", "k1"),
+                    ("Idempotency-Key", "k2"),
+                    ("If-Match", "0"),
+                ],
+            ),
+        );
+        assert_eq!(r.status, 400, "{}", r.body);
+        assert!(r.body.contains("duplicate"), "{}", r.body);
+        assert!(l.transfers.is_empty());
+    }
+
+    #[test]
+    fn the_lenient_configuration_resolves_a_duplicated_header_to_the_last_value() {
+        // I7. Matches the lenient body decoder: last-wins, not a rejection.
+        let mut l = Ledger::default();
+        let r = handle(
+            &FailureModes::all_hostile(),
+            &mut l,
+            &post(
+                "/v1/transfer",
+                r#"{"to":"acct-9","amount":1,"fee_tier":"standard"}"#,
+                &[("Idempotency-Key", "k1"), ("Idempotency-Key", "k2")],
+            ),
+        );
+        assert_eq!(r.status, 200, "{}", r.body);
+    }
+
+    #[test]
+    fn boundable_mode_rejects_a_duplicated_idempotency_key_on_orders_too() {
+        // I7, orders route. Same policy, same header, the other write
+        // route that reads it.
+        let mut l = Ledger::default();
+        let r = handle(
+            &FailureModes::boundable(),
+            &mut l,
+            &post(
+                "/v1/orders",
+                "{}",
+                &[
+                    ("Authorization", "Capability nonce=n1"),
+                    ("Idempotency-Key", "k1"),
+                    ("Idempotency-Key", "k2"),
+                ],
+            ),
+        );
+        assert_eq!(r.status, 400, "{}", r.body);
+        assert!(l.orders.is_empty());
     }
 }
