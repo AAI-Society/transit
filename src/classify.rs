@@ -41,6 +41,22 @@ pub enum ConditionVerdict {
     },
 }
 
+/// A body property the endpoint may fill in from its own state when the client
+/// leaves it out — one concrete C1 exposure, named and typed so that
+/// `transit guard` can be configured to demand it.
+///
+/// Body properties only. `require_parameters` matches a literal top-level key
+/// of the JSON body, so a query or header parameter cannot appear here even
+/// though it is just as much a C1 exposure. That gap is real and is reported
+/// separately rather than silently dropped: see `unbound_elsewhere`.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct UnboundParam {
+    pub name: String,
+    /// The guard's `ParamType` spelling, taken from the schema's declared
+    /// type. `string` is the guard's default, so those emit as a bare name.
+    pub param_type: String,
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct Classification {
     pub operation: String,
@@ -52,6 +68,14 @@ pub struct Classification {
     /// one is load-bearing for a given deployment.
     pub failing: Vec<Condition>,
     pub evidence: Evidence,
+    /// Body properties a client may omit, which is exactly what
+    /// `require_parameters` exists to forbid. Empty when C1 is `Satisfied`.
+    pub unbound_body: Vec<UnboundParam>,
+    /// C1 exposures outside the body — optional query and header parameters.
+    /// A proxy that reads the body cannot enforce these, so they are listed
+    /// for a human to act on rather than emitted into a config that would
+    /// imply they were covered.
+    pub unbound_elsewhere: Vec<String>,
 }
 
 impl Classification {
@@ -300,6 +324,54 @@ fn contains_any(haystack: &str, needles: &[&str]) -> bool {
     needles.iter().any(|n| haystack.contains(n))
 }
 
+/// The JSON Schema type as the guard spells it. Anything absent or
+/// unrecognised becomes `string`, which is the guard's own default, so the
+/// emitted config never asserts a type the document did not state.
+fn guard_type(schema: &Value) -> String {
+    match schema.get("type").and_then(Value::as_str) {
+        Some("number") | Some("integer") => "number",
+        Some("boolean") => "bool",
+        Some("array") => "array",
+        Some("object") => "object",
+        _ => "string",
+    }
+    .to_string()
+}
+
+/// The body properties a client may leave out, which is precisely the set
+/// `require_parameters` exists to forbid leaving out.
+///
+/// Same predicate as `judge_c1` uses for its body half — not required, or
+/// carrying a `default` — because a config that demanded a different set from
+/// the one the verdict complained about would be answering a question nobody
+/// asked.
+fn unbound_body(schema: Option<&Value>) -> Vec<UnboundParam> {
+    let required = required_names(schema);
+    let mut out: Vec<UnboundParam> = properties(schema)
+        .into_iter()
+        .filter(|(n, p)| !required.contains(n) || p.get("default").is_some())
+        .map(|(name, p)| UnboundParam {
+            param_type: guard_type(p),
+            name,
+        })
+        .collect();
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    out
+}
+
+/// C1 exposures a body-reading proxy cannot reach: optional query and header
+/// parameters. Path parameters are excluded, as in `judge_c1`, because the
+/// template requires them structurally.
+fn unbound_elsewhere(params: &[Param]) -> Vec<String> {
+    let mut out: Vec<String> = params
+        .iter()
+        .filter(|p| !p.required && p.location != "path")
+        .map(|p| format!("{} ({})", p.name, p.location))
+        .collect();
+    out.sort();
+    out
+}
+
 fn classify_operation(
     path: &str,
     method: &str,
@@ -346,6 +418,8 @@ fn classify_operation(
         verdict,
         failing,
         evidence: Evidence::SpecDerived,
+        unbound_body: unbound_body(schema),
+        unbound_elsewhere: unbound_elsewhere(&params),
     }
 }
 
@@ -581,6 +655,82 @@ fn judge_c4(schema: Option<&Value>, params: &[Param]) -> ConditionVerdict {
     }
 }
 
+/// Emit a `transit guard` configuration that enforces what these
+/// classifications say the specification leaves open.
+///
+/// This exists because the translation is otherwise done by hand, and by hand
+/// it is done wrong. `classify` reports C1 as an English sentence naming
+/// `capture, currency, description, idempotency-key (header)`; the guard wants
+/// TOML, wants the types, and wants the header entry dropped, because
+/// `require_parameters` matches a literal top-level body key and a header is
+/// not one. Asking an operator to perform that edit correctly, per route, is
+/// asking for the exact configuration mistake that leaves C1 unenforced --
+/// and an unenforced C1 fails open and silently.
+///
+/// What it deliberately does not do: guess whether a route is read-only.
+/// `require_idempotency_key` and `require_state_precondition` stay at their
+/// global defaults, because a specification cannot say whether a POST changes
+/// state, and quietly relaxing a rule on a route that needed it would be the
+/// worst thing this function could do.
+pub fn emit_guard_config(cs: &[Classification]) -> String {
+    let mut out = String::new();
+    out.push_str(
+        "# Generated by `transit classify --emit-guard-config`.\n\
+         #\n\
+         # Every `require_parameters` entry below is a body property the\n\
+         # specification says a client may omit -- which means the endpoint\n\
+         # fills it in from its own state, which is the C1 parameter-\n\
+         # defaulting bypass. The guard refuses a request that omits one, or\n\
+         # that supplies it as the wrong JSON type, with 422.\n\
+         #\n\
+         # REVIEW THIS BEFORE DEPLOYING IT. It is derived from a document, so\n\
+         # it is only as right as the document is, and it will refuse traffic\n\
+         # that works today. Point it at a staging upstream first.\n\n",
+    );
+    out.push_str("listen   = \"0.0.0.0:8080\"\n");
+    out.push_str("upstream = \"http://CHANGE-ME:8080\"\n\n");
+
+    for c in cs {
+        out.push_str(&format!("# {} {} -- {:?}\n", c.method, c.path, c.verdict));
+        for cond in &c.failing {
+            out.push_str(&format!("#   fails {}\n", cond.title()));
+        }
+        if !c.unbound_elsewhere.is_empty() {
+            // Named, never emitted. A query parameter is as much a C1 hole as
+            // a body property, and this proxy cannot close it -- so the
+            // operator is told rather than left with a config that looks
+            // complete.
+            out.push_str(
+                "#   NOT COVERED by this proxy -- optional parameters outside the body.\n\
+                 #   A body-reading guard cannot enforce these. Fix them at the endpoint:\n",
+            );
+            for p in &c.unbound_elsewhere {
+                out.push_str(&format!("#     {p}\n"));
+            }
+        }
+        if c.unbound_body.is_empty() {
+            out.push_str("#   no unbound body properties; no route rule needed for C1\n\n");
+            continue;
+        }
+        out.push_str("[[route]]\n");
+        out.push_str(&format!("method = \"{}\"\n", c.method));
+        out.push_str(&format!("path_prefix = \"{}\"\n", c.path));
+        let items: Vec<String> = c
+            .unbound_body
+            .iter()
+            .map(|p| {
+                if p.param_type == "string" {
+                    format!("\"{}\"", p.name)
+                } else {
+                    format!("{{ name = \"{}\", type = \"{}\" }}", p.name, p.param_type)
+                }
+            })
+            .collect();
+        out.push_str(&format!("require_parameters = [{}]\n\n", items.join(", ")));
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -773,6 +923,50 @@ mod tests {
             classify_spec(spec).is_ok(),
             "a legal recursive schema must not hang"
         );
+    }
+
+    #[test]
+    fn the_emitted_config_names_the_body_properties_and_types_the_verdict_complained_about() {
+        let cs = classify_spec(
+            &std::fs::read_to_string("examples/stripe-charges.openapi.json").unwrap(),
+        )
+        .unwrap();
+        let toml = emit_guard_config(&cs);
+
+        // `capture` is a boolean with a default, so it must carry its type:
+        // the guard's default is `string`, and a `capture` sent as a real
+        // boolean would then fail the presence check as "wrong type".
+        assert!(
+            toml.contains(r#"{ name = "capture", type = "bool" }"#),
+            "{toml}"
+        );
+        // `currency` is a string with a default, so a bare name is right.
+        assert!(toml.contains(r#""currency""#), "{toml}");
+        // The header is a genuine C1 exposure and is NOT a body key, so it
+        // must be reported and must not appear inside require_parameters.
+        assert!(toml.contains("idempotency-key (header)"), "{toml}");
+        let params_line = toml
+            .lines()
+            .find(|l| l.starts_with("require_parameters"))
+            .expect("a route rule was emitted");
+        assert!(
+            !params_line.contains("idempotency-key"),
+            "a header cannot be a body key: {params_line}"
+        );
+    }
+
+    #[test]
+    fn a_qualified_specification_emits_no_route_rule() {
+        // ISO 20022 has no optional body property, so there is nothing for
+        // `require_parameters` to demand. Emitting an empty rule would be
+        // noise an operator has to read and decide about.
+        let cs = classify_spec(
+            &std::fs::read_to_string("examples/iso20022-pain001.openapi.json").unwrap(),
+        )
+        .unwrap();
+        let toml = emit_guard_config(&cs);
+        assert!(!toml.contains("[[route]]"), "{toml}");
+        assert!(toml.contains("no unbound body properties"), "{toml}");
     }
 
     #[test]

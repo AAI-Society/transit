@@ -32,7 +32,9 @@
     ],
     "verdict": "Qualified",
     "failing": [],
-    "evidence": "spec_derived"
+    "evidence": "spec_derived",
+    "unbound_body": [],
+    "unbound_elsewhere": []
   }
 ]
 ,
@@ -69,7 +71,9 @@
     ],
     "verdict": "Qualified",
     "failing": [],
-    "evidence": "spec_derived"
+    "evidence": "spec_derived",
+    "unbound_body": [],
+    "unbound_elsewhere": []
   }
 ]
 ,
@@ -114,7 +118,30 @@
       "C2",
       "C3"
     ],
-    "evidence": "spec_derived"
+    "evidence": "spec_derived",
+    "unbound_body": [
+      {
+        "name": "link_names",
+        "param_type": "bool"
+      },
+      {
+        "name": "parse",
+        "param_type": "string"
+      },
+      {
+        "name": "text",
+        "param_type": "string"
+      },
+      {
+        "name": "unfurl_links",
+        "param_type": "bool"
+      },
+      {
+        "name": "username",
+        "param_type": "string"
+      }
+    ],
+    "unbound_elsewhere": []
   }
 ]
 ,
@@ -154,7 +181,24 @@
     ],
     "verdict": "Conditional",
     "failing": [],
-    "evidence": "spec_derived"
+    "evidence": "spec_derived",
+    "unbound_body": [
+      {
+        "name": "capture",
+        "param_type": "bool"
+      },
+      {
+        "name": "currency",
+        "param_type": "string"
+      },
+      {
+        "name": "description",
+        "param_type": "string"
+      }
+    ],
+    "unbound_elsewhere": [
+      "idempotency-key (header)"
+    ]
   }
 ]
 }

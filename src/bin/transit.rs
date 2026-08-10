@@ -77,6 +77,11 @@ enum Cmd {
         spec: PathBuf,
         #[arg(long, default_value = "text")]
         format: Format,
+        /// Emit a `transit guard` config that enforces what this
+        /// specification leaves open, instead of a verdict. Redirect it to a
+        /// file, read it, then run `transit guard --config` on it.
+        #[arg(long)]
+        emit_guard_config: bool,
     },
     /// Run the enforcing reverse proxy in front of an upstream API.
     Guard {
@@ -390,10 +395,23 @@ fn run() -> Result<ExitCode> {
                 ExitCode::SUCCESS
             })
         }
-        Cmd::Classify { spec, format } => {
+        Cmd::Classify {
+            spec,
+            format,
+            emit_guard_config,
+        } => {
             let src = std::fs::read_to_string(&spec)
                 .with_context(|| format!("reading {}", spec.display()))?;
             let cs = transit::classify::classify_spec(&src)?;
+            if emit_guard_config {
+                print!("{}", transit::classify::emit_guard_config(&cs));
+                // Exit 0 even for a non-qualifying spec. Here the verdict is
+                // the *input* to a config generator rather than a pass/fail
+                // result, and exiting 1 would abort the `> guard.toml`
+                // redirect this subcommand exists to be used in under any
+                // shell running `set -e`.
+                return Ok(ExitCode::SUCCESS);
+            }
             if format == Format::Json {
                 println!("{}", serde_json::to_string_pretty(&cs)?);
             } else {

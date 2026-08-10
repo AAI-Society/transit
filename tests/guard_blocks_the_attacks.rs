@@ -98,6 +98,95 @@ fn alias_collapse_passes_through_and_that_is_the_boundary() {
     );
 }
 
+/// The whole developer workflow, in one test: point the classifier at a
+/// specification, feed what it emits straight into the guard, and check that
+/// the attack the classifier warned about is now refused.
+///
+/// This is the claim `--emit-guard-config` makes, and it is the one worth
+/// pinning. The two halves are written by different modules that share no
+/// types -- `classify` emits text, `guard` parses it -- so a change to either
+/// side's vocabulary breaks this and nothing else.
+#[test]
+fn a_config_generated_from_a_specification_stops_the_bypass_it_warned_about() {
+    let spec = std::fs::read_to_string("examples/stripe-charges.openapi.json").unwrap();
+    let cs = transit::classify::classify_spec(&spec).unwrap();
+
+    // The classifier says a client may omit `currency`, and that the endpoint
+    // will then fill it in -- the C1 exposure.
+    assert!(cs[0].unbound_body.iter().any(|p| p.name == "currency"));
+
+    let generated = transit::classify::emit_guard_config(&cs);
+    let mut cfg = transit::guard::parse_config(&generated)
+        .expect("what classify emits must be what guard accepts");
+    cfg.upstream = "http://127.0.0.1:8787".into();
+
+    // Before: this request omits `currency`, and a bare proxy forwards it.
+    let omits_currency = Request {
+        method: "POST".into(),
+        path: "/v1/charges".into(),
+        headers: vec![
+            ("Content-Type".into(), "application/json".into()),
+            ("Idempotency-Key".into(), "k1".into()),
+            ("If-Match".into(), "0".into()),
+        ],
+        body: r#"{"amount":100,"source":"tok_1","capture":true,"description":"x"}"#.into(),
+    };
+    let mut bare = cfg.clone();
+    bare.route.clear();
+    assert!(
+        matches!(decide(&bare, &omits_currency), Decision::Forward(_)),
+        "without the generated rule the bypass goes through"
+    );
+
+    // After: the generated rule refuses it, and names C1 as the reason.
+    let d = decide(&cfg, &omits_currency);
+    assert!(
+        matches!(
+            d,
+            Decision::Reject {
+                status: 422,
+                condition: Some(corpus::Condition::C1),
+                ..
+            }
+        ),
+        "{d:?}"
+    );
+
+    // And the generated types are load-bearing, not decoration. `capture` is
+    // declared `bool`; sending it as the string "true" satisfies a presence
+    // check and is still read as absent by an upstream expecting a boolean.
+    let wrong_type = Request {
+        body:
+            r#"{"amount":100,"source":"tok_1","capture":"true","description":"x","currency":"usd"}"#
+                .into(),
+        ..omits_currency.clone()
+    };
+    let d = decide(&cfg, &wrong_type);
+    assert!(
+        matches!(
+            d,
+            Decision::Reject {
+                condition: Some(corpus::Condition::C1),
+                ..
+            }
+        ),
+        "a wrong-typed parameter must not pass as present: {d:?}"
+    );
+
+    // A fully explicit request is forwarded. Without this the test would pass
+    // against a guard that refused everything.
+    let complete = Request {
+        body:
+            r#"{"amount":100,"source":"tok_1","capture":true,"description":"x","currency":"usd"}"#
+                .into(),
+        ..omits_currency
+    };
+    assert!(
+        matches!(decide(&cfg, &complete), Decision::Forward(_)),
+        "a request that names every parameter must still get through"
+    );
+}
+
 #[test]
 fn every_corpus_payload_is_stopped() {
     for case in corpus::cases() {

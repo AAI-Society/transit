@@ -130,6 +130,17 @@ cargo run --example duplicate_key
 cargo run --example tie_break
 ```
 
+**If you have an API and want to know what to do about it, start at
+[`docs/USING.md`](docs/USING.md).** It is organised by situation — you own the
+endpoint, you write the client, or you want to see the failure first — and the
+short version is three commands:
+
+```bash
+transit classify --spec ./your-openapi.json                      # what's wrong
+transit classify --spec ./your-openapi.json --emit-guard-config  # config that fixes it
+transit guard --config guard.toml                                # enforce it
+```
+
 Or the whole argument in one command — the vulnerable endpoint, the guard in
 front of it, and the same payload sent at each:
 
