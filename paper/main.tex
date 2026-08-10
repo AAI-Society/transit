@@ -113,215 +113,288 @@ short at this stage rather than inherited from a sibling paper.}}}
 \end{center}
 \vspace{-0.5em}
 \noindent{\small
-A capability token says an agent may do a thing. A signature says which bytes
-it asked for. Neither says what the endpoint then did. We call the space
-between the authorized message and the performed effect the \emph{effect
-binding gap}, and this paper is about when it can be closed and when it
-cannot. We open with a case where every component behaves correctly and the
-composition is still wrong: a network retry over a non-idempotent operation,
-where one branch tells the client the operation failed while the state changed
-anyway, and the other executes it twice. No message-level mechanism resolves
-this, because the distinction between an adversarial replay and an
-infrastructure retry does not exist at the message layer. We then state four
-conditions---parameter completeness, representation injectivity, strict
-idempotency with nonce-decoupled retries, and contextual state
-pinning---which together are \emph{sufficient} for an authorized message to
-determine its effect, and we are careful to say that we have not shown them
-necessary. We built a harness, \transit{}, that checks them: a parameterized
-JSON decoder that reproduces the disagreements between real language runtimes
-and is falsified against those runtimes; a deliberately hostile endpoint with
-individually switchable failure modes; and an enforcing reverse proxy that
-closes representation injectivity at the boundary, closes parameter
-completeness where it is configured to, and---we say this plainly---does not
-close alias collapse at all, because no proxy can. Finally we re-examine a
-24-endpoint documentation survey we inherited, and report that its own table
-does not support the percentages its prose reports. The corrected split is
-4~/~7~/~13 rather than 4~/~6~/~14. We report that as a finding about the
-method, not a rounding fix: it is a convenience sample classified from
-documents, and 54\% is not a population estimate any more than 58\% was.}
+Here is something that sounds like it must be true, and isn't. You give a
+program permission to do a thing. It signs a message saying what it wants. The
+message arrives with the signature intact, nobody tampered with anything. So
+the thing that happens is the thing you approved---right?
+
+No. And it fails even when nobody is attacking you. Take a network retry over
+an operation that isn't idempotent. Retry with the same one-time nonce and the
+endpoint tells your client the operation failed---a lie, because it already
+committed. Retry with a fresh nonce and it does the whole thing twice. Both
+branches are wrong and there is no third branch. Every component followed its
+manual. You cannot fix it by improving the message, because on the wire an
+attacker replaying you and a load balancer retrying you are the same event;
+the difference is somebody's intent, and intent is not a field in a JSON
+object.
+
+So we ask what would have to be true for the approved message to determine the
+effect, and give four conditions: put every input in the message, give one
+meaning one spelling, make redelivery harmless, and name the state you are
+assuming. Together they are enough. We are loud about not having shown them
+necessary---the document we inherited claims both directions and established
+one.
+
+Then we built it and tried to break it. There is a JSON decoder you can dial
+to behave like Go, Node, Python, Ruby or Elixir, checked against the real
+runtimes rather than asserted. There is an endpoint built to be bad in five
+separate ways you can switch on one at a time. And there is a proxy for real
+APIs, which closes one condition outright, closes another only if you
+configure it, and cannot close the third at all---not ``doesn't yet,'' cannot.
+We wrote a test asserting that third attack \emph{succeeds}, so the claim
+cannot quietly grow later.
+
+Finally we recounted a 24-endpoint survey we had inherited and the table does
+not say what the prose around it says: 4~/~7~/~13, not 4~/~6~/~14, one row
+dropped from one bucket and absorbed into another. We report that rather than
+quietly fixing it. We also say what the corrected number still does not
+license: two dozen endpoints picked for industry coverage is not a random
+sample, so 54\% is no more a fact about the world's APIs than 58\% was.}
 
 \clearpage
 
 \section{The Problem}
 \label{sec:problem}
 
-Start with a case where nobody makes a mistake.
+I want to start with a case where nobody does anything wrong. That is
+important. It is easy to look at a security paper, find the villain, and
+conclude that the lesson is ``don't be that guy.'' Here there is no villain.
+Everybody follows the manual and the result is still broken, and that tells
+you the trouble is in the arrangement rather than in anyone's carelessness.
 
-An agent holds a capability token. The token is scoped, short-lived, and
-carries a one-time nonce so it cannot be replayed. The agent asks an endpoint
-to place an order. It signs the request bytes. The endpoint verifies the
-signature, checks that the nonce has not been seen, commits the order, and
-begins writing a response.
+So: a program holds a token that lets it place an order. The token is narrow,
+it expires quickly, and it carries a number that may be used exactly
+once---a nonce---so that nobody can record the request and send it again
+later. The program signs the bytes of its request. The endpoint checks the
+signature: good. It checks the nonce: never seen before, good. It writes the
+order into the database. It starts composing a reply.
 
 The connection drops.
 
-Somewhere between the endpoint and the agent---a load balancer, a service
-mesh, a client library with a sensible default---something decides to retry.
-It has two choices, and both of them are wrong.
+Now something between the two machines---a load balancer, a service mesh, a
+client library with a perfectly sensible default---decides to try again. And
+here is the whole paper in one paragraph: it has two ways to try again, and
+both of them are wrong.
 
-If it retries with the same nonce, the endpoint sees a nonce it has already
-consumed and refuses with \texttt{409 Conflict}. That is exactly the right
-behaviour against a replay attack. But this was not a replay; the order is
-already committed. The client is now told the operation failed, and the
-operation happened.
+Suppose it sends the identical request, same nonce and all. The endpoint looks
+at the nonce, sees that it has already been used, and refuses. Now, that is
+the correct behaviour! That is precisely what you built the nonce for. If
+somebody had recorded your request and was replaying it, you would want
+exactly this. But nobody recorded anything. The order is sitting in the
+database. Your program has now been told, in a well-formed and correctly
+signed message, that the operation failed. It didn't fail. It happened.
 
-If instead the client obtains a fresh nonce and retries, the endpoint sees a
-legitimate, correctly signed, never-before-seen request and commits the order
-a second time. Two orders. One intent.
+All right, suppose instead the program gets a fresh nonce and tries again. Now
+the endpoint sees a request that is legitimate, correctly signed, and has
+never been seen before---because it hasn't---so it does what you told it to
+do and places the order. Two orders. One customer. One intention.
 
-Every step here is individually correct. The signature check is correct. The
-nonce check is correct---it is doing precisely the job replay protection
-exists to do. The retry is correct; retrying a failed request is what
-reliable transports are for. The composition is broken anyway, and it is
-broken in a way that no amount of care at the message layer will fix, because
-the message layer cannot see the difference. An adversarial replay and an
-infrastructure retry are, at the level of bytes on a wire, the same event.
-The distinction lives in intent, and intent is not in the message.
+Look at what we have. The signature check: right. The nonce check: right, and
+doing its job well. The retry: right, that's what reliable transports are
+\emph{for}. Every piece is correct and the assembly is wrong. And you cannot
+repair it by making the message fancier, because the message layer is blind
+to the distinction that matters. To an attacker replaying you and to a load
+balancer retrying you, the bytes on the wire are identical. They are the same
+event. The difference lives in somebody's intention, and intention is not a
+field you can add to a JSON object.
 
-This is the shape of the whole problem. We will call the property we want
-\emph{effect binding}: that an authorized message determines the effect
-performed. What the retry case shows is that message authorization---the thing
-capability protocols actually provide, and provide well---does not deliver it,
-and cannot be patched into delivering it by strengthening the message.
+That is the whole shape of the thing. Let us give the property we want a name:
+\emph{effect binding}, meaning that the message you approved determines the
+effect that happens. What the retry case shows is that message
+authorization---which is what capability protocols give you, and they give it
+to you well---is a different property, and no amount of strengthening the
+message will turn one into the other.
 
-There is a remedy, and it is worth naming now because it is the shape of every
-remedy in this paper. Decouple the business idempotency key from the
-authorization nonce. Let the client carry a key that names \emph{the order},
-constant across retries, while the nonce names \emph{the request} and changes.
-Then the fresh-nonce retry arrives with a key the endpoint has already seen,
-and the endpoint returns the cached result of the first execution instead of
-performing a second one. ISO~20022 has had this for years in the form of the
-end-to-end identifier~\cite{iso20022}; HTTP has it as the
-\texttt{Idempotency-Key} header. It closes one horn.
+There is a repair, and it is worth showing now because every repair in this
+paper has the same shape. The mistake is that we used one number for two jobs.
+The nonce is supposed to answer ``is this request fresh?'' and we quietly
+asked it to also answer ``is this the same order?'' Those are different
+questions. So use two numbers. Let the nonce change on every retry, as it
+should. Let the client also carry a key that names \emph{the order}, and hold
+that key constant across retries. Then the fresh-nonce retry shows up carrying
+an order key the endpoint has seen before, and the endpoint hands back the
+result it computed the first time instead of doing the work again. ISO~20022
+has had this for years---they call it the end-to-end
+identifier~\cite{iso20022}---and HTTP has it as the
+\texttt{Idempotency-Key} header.
 
-It does not close the other. If the first response never arrives, the client
-still does not know whether the effect happened. It can ask---but asking is a
-second message, and the answer to it can be lost too. What remains after every
-endpoint-side fix is applied is a residual: a committed operation that the
-client believes failed. We report it separately from the findings throughout,
-because a conformant endpoint that shows no findings has not made this go
-away, and printing ``no findings'' over it would be the paper claiming
-something the paper does not believe.
+That closes one of the two branches. It does not close the other, and I want
+to be honest about this rather than let you discover it later. If the first
+reply never arrives, your program still does not know whether the effect
+happened. It can ask, of course. But asking is another message, and that
+message can be lost too, and so can the answer. You can push the uncertainty
+around but you cannot make it go away. What is left over, after every fix an
+endpoint can make, is a committed operation that the client believes failed.
 
-\subsection{The adversarial companion}
+We report that leftover separately from everything else the tool finds. A
+well-behaved endpoint shows no findings, and if we printed ``no findings'' and
+stopped, we would be telling you the problem was gone. It isn't gone. So the
+tool prints the leftover under its own heading, every time, even on a clean
+run.
 
-The retry case is what goes wrong when nobody is attacking. Here is what goes
-wrong when someone is.
+\subsection{Now suppose somebody is attacking you}
 
-An authorization service and an endpoint both parse JSON. They are written in
-different languages, as services in a real deployment usually are. Consider:
+That was what goes wrong with nobody attacking. Here is what goes wrong when
+somebody is, and it is more embarrassing.
+
+Two programs both read JSON. One decides whether the request is allowed; the
+other carries it out. In a real deployment they are usually written in
+different languages, because different teams built them. Look at this:
 
 \begin{lstlisting}
 {"to":"acct-1","amount":100,"to":"acct-9"}
 \end{lstlisting}
 
-The key \texttt{to} appears twice. RFC~8259 permits this and says nothing
-about which value wins; RFC~7493 (I-JSON) forbids it
-outright~\cite{rfc8259,rfc7493}. Real decoders therefore disagree, and they
-disagree silently. Go's \texttt{encoding/json} keeps the last occurrence.
-Erlang/OTP's \texttt{json} module, which Elixir uses, keeps the first. Both
-are defensible readings of an underspecified document.
+The key \texttt{to} is in there twice. Is that legal? RFC~8259 says yes and
+declines to say which one wins. RFC~7493 says no, don't do
+that~\cite{rfc8259,rfc7493}. So the standards disagree, which means the
+implementations disagree, and---this is the bad part---they disagree without
+complaining. Go's \texttt{encoding/json} keeps the last one it sees.
+Erlang/OTP's \texttt{json} module, which is what Elixir uses, keeps the first
+one. Neither is a bug. Both are reasonable ways to read a document whose own
+specification shrugged.
 
-So the authorization service reads a transfer to \texttt{acct-1}, applies its
-policy, and signs. The endpoint reads a transfer to \texttt{acct-9} and
-executes it. The signature verifies. The bytes were not altered in transit.
-The authorized message and the performed effect differ, and every component
-did what it was documented to do.
+So now: the program that decides policy reads ``pay \texttt{acct-1}'', thinks
+that looks fine, and signs. The program that moves the money reads ``pay
+\texttt{acct-9}'' and pays \texttt{acct-9}. The signature verifies perfectly.
+Not one byte was altered anywhere. Both programs did exactly what their
+documentation promised. And your money went to the wrong place.
 
-This is a parser differential~\cite{kaminsky2010}, and the family is old:
-HTTP request smuggling is the same failure between a front-end and a back-end
-that disagree about where a request ends~\cite{linhart2005,kettle2019}. What
-is new is the setting. When a human clicks a button, the button and the
-handler are usually the same program. When an agent signs a request, the
-signer and the executor are usually not.
+People call this a parser differential~\cite{kaminsky2010}. The name doesn't
+matter much. What matters is that it is an old family---HTTP request smuggling
+is the same trick played on a front-end and a back-end that disagree about
+where one request stops and the next starts~\cite{linhart2005,kettle2019}. What
+is new is the arrangement. When a person clicks a button, the thing that shows
+the button and the thing that handles the click are usually the same program,
+so there is nothing to disagree with. When a program signs a request on your
+behalf, the signer and the doer are almost never the same program. We have
+taken a fifty-year-old class of bug and built an industry on top of the
+conditions that produce it.
 
 \section{What Others Have Built}
 \label{sec:related}
 
-\paragraph{Complete mediation, and the assumption inside it.}
-Saltzer and Schroeder's design principles put complete mediation
-first: every access to every object must be checked~\cite{saltzer1975}. The
-reference monitor concept it formalizes~\cite{anderson1972} carries an
-assumption that was so obviously true in 1972 that it did not need stating---%
-the monitor and the resource are the same machine. The monitor inspects the
-request and the machine performs it, and there is no gap between them because
-there is no distance.
+None of this is new territory. Smart people have been working on the
+surrounding problems for fifty years, and I want to go through what they built
+and be careful about what each thing does and does not settle. Being careless
+here is how you end up thinking a problem is solved because something nearby
+is solved.
 
-Capability protocols distribute that monitor. The authorization decision
-happens in one process, on one host, in one language; the effect happens in
-another. The gap the original model defined away is exactly the gap this
-paper is about. Complete mediation is not wrong; it is silent on the case
-where mediating and performing are done by different programs that must agree
-about what a request says.
+\paragraph{Complete mediation, and the assumption hiding inside it.}
+Saltzer and Schroeder put complete mediation near the top of their list of
+design principles: check every access to every object, every
+time~\cite{saltzer1975}. The reference monitor that formalizes
+this~\cite{anderson1972} carries an assumption so obvious in 1972 that nobody
+wrote it down, which is that the monitor and the thing being protected are the
+same machine. The monitor looks at the request; the machine performs it. There
+is no gap between deciding and doing because there is no distance between them.
+
+Now take that monitor and split it across a network. The decision happens in
+one process, on one host, in one programming language. The effect happens
+somewhere else, in a different language, written by different people. The gap
+that the 1972 model defined out of existence is precisely the gap I have been
+describing. Complete mediation isn't wrong. It simply has nothing to say about
+the case where the decider and the doer are two programs that have to agree on
+what a request means---and, as we have just seen, sometimes don't.
 
 \paragraph{Capabilities.}
-The lineage runs from Dennis and Van Horn~\cite{dennis1966} through Levy's
-survey~\cite{levy1984} to macaroons~\cite{birgisson2014}, which add
-contextual caveats a bearer can attenuate but not widen. Macaroons are a good
-answer to \emph{what may be requested}. They say nothing about what the
-receiving endpoint does with the request once it parses it, and the caveat
-language has no vocabulary for effects.
+This runs from Dennis and Van Horn~\cite{dennis1966} through Levy's
+survey~\cite{levy1984} to macaroons~\cite{birgisson2014}, which let a holder
+narrow a token but never widen it. That is a genuinely good answer to the
+question ``what is this bearer allowed to ask for?'' It is not an answer to
+``what will the endpoint do with what it asked?'' The caveat language has no
+words for effects. It could not have; that is not what it is for.
 
-\paragraph{Formal methods for the message layer, and only that layer.}
+\paragraph{Proofs about messages, which are proofs about messages.}
 The Dolev--Yao model~\cite{dolevyao1983} and the tools built on
-it---ProVerif~\cite{blanchet2001}, Tamarin~\cite{meier2013}---are the right
-instruments for reasoning about protocol messages under an active attacker,
-and they are very good ones. We want to be precise about their scope, because
-it is easy to overread a green checkmark. A Tamarin proof that a capability
-protocol is secure is a statement about messages: which ones an attacker can
-produce, which secrets stay secret, which agreements hold. It is not evidence
-about effects. The endpoint's parser, its defaulting behaviour, and its
-persistence layer are outside the model, and the retry case in
-Section~\ref{sec:problem} is invisible to it: both branches are protocol-legal.
+it---ProVerif~\cite{blanchet2001}, Tamarin~\cite{meier2013}---are excellent.
+I mean that. If you want to know what an attacker can do to your protocol
+messages, these are the right instruments and they are far better than
+intuition.
+
+But I want to be careful, because a green checkmark from a good tool is easy
+to overread. When Tamarin tells you a capability protocol is secure, it is
+telling you something about messages: which ones an attacker can manufacture,
+which secrets stay secret, who agrees with whom about what. The endpoint's
+parser is not in the model. Its defaulting behaviour is not in the model. Its
+database is not in the model. And the retry case from
+Section~\ref{sec:problem} is completely invisible to such a proof, because
+both branches are protocol-legal. Nothing was forged. The proof is correct and
+the system is broken, and those two facts sit together without contradiction
+because they are about different things.
 
 \paragraph{The confused deputy.}
-Hardy's compiler~\cite{hardy1988} was tricked into using its own authority on
-behalf of a caller who lacked it. The structure is the same one here: a
-component with authority acts on a request whose meaning it has mis-attributed.
-The difference is where the ambiguity lives. Hardy's deputy was confused about
-\emph{whose} authority applied; ours is confused about \emph{what was asked}.
+Hardy's compiler~\cite{hardy1988} was talked into using its own authority for
+a caller who didn't have any. Same skeleton as ours: a component with power
+acts on a request whose meaning it got wrong. The difference is which part it
+got wrong. Hardy's deputy was confused about \emph{whose} authority was in
+play. Ours is confused about \emph{what was asked}.
 
 \paragraph{Canonical form.}
-RFC~8785 (JCS) specifies a canonical serialization for JSON~\cite{rfc8785},
-and RFC~7493 profiles the subset over which that is
-well-defined~\cite{rfc7493}. Together they are the strongest available answer
-to the duplicate-key differential, and one of our practical conclusions is
-simply that authorization pipelines should decode strictly and canonicalize
-before verifying a signature rather than after.
+RFC~8785 defines a canonical way to write JSON down~\cite{rfc8785}, and
+RFC~7493 defines the subset of JSON on which that is even
+meaningful~\cite{rfc7493}. Together they are the best available answer to the
+duplicate-key problem, and one of our practical conclusions is dull enough to
+state in a sentence: decode strictly and canonicalize \emph{before} you check
+the signature, not after. It is the cheapest fix in this paper and probably
+the one with the largest effect.
 
 \paragraph{RFC 9110.}
-HTTP's own definitions of safe and idempotent
-methods~\cite{rfc9110} are load-bearing for condition C3 below: a \texttt{PUT}
-is idempotent by method, and a \texttt{POST} is not, and the specification
-says so normatively rather than by convention.
+HTTP already says which of its methods are idempotent and which are
+not~\cite{rfc9110}. \texttt{PUT} is; \texttt{POST} isn't. This is normative
+text, not folklore, and we lean on it directly in condition C3.
 
-\paragraph{ISO 20022, read closely.}
-Of everything in this section, ISO~20022~\cite{iso20022} is the strongest
-existing answer, and it is worth reading rather than citing. Its
-\texttt{pain.001} credit transfer has a mandatory closed schema, so there are
-no optional parameters for a server to fill in; it binds an end-to-end
-identifier that is distinct from any transport-level retry mechanism; and
-the identifier is required rather than optional. That is three of our four
-conditions, met by a message format designed in the 2000s for a domain that
-could not tolerate the alternative. It is proof that the conditions are
-achievable in practice. It is also, notably, not a general-purpose web API.
+\paragraph{ISO 20022, which mostly solved this in the 2000s.}
+Of everything in this section, this~\cite{iso20022} is the strongest existing
+answer, and it deserves reading rather than citing. Look at what the
+\texttt{pain.001} credit transfer actually does. The schema is mandatory and
+closed, so there are no optional fields for a server to helpfully fill in on
+your behalf. It carries an end-to-end identifier that is separate from
+anything the transport does about retries. And that identifier is required,
+not optional, so a client cannot forget it.
+
+That is three of our four conditions, met by a message format designed by
+people who could not afford to get this wrong, roughly two decades before
+anybody was worried about software agents. So the conditions are achievable.
+That is worth knowing, and it is the main reason I do not think this paper is
+describing an impossibility.
+
+It is also worth noticing what ISO~20022 is not. It is not a general-purpose
+web API. Nobody designs a REST endpoint that way on a Tuesday afternoon, and
+the interesting question is how much of that discipline an ordinary API can
+adopt without becoming a payments network.
 
 \section{Writing It Down Precisely}
 \label{sec:conditions}
 
-Model an endpoint as a state transformer. Let $\Sigma$ be the endpoint's state
-space, $W$ the set of wire representations (byte strings), and $O$ the set of
-observable outputs. Parsing is a partial function $P : W \rightharpoonup D$
-into documents, and the endpoint is
+Now I have to write down some symbols, and I want to say why before I do it.
+The symbols are not going to make anything truer than it was in
+Section~\ref{sec:problem}. Everything important has already been said in
+English. What the notation buys us is that it makes it much harder to be
+vague---in particular, it forces us to write down exactly which things the
+effect is allowed to depend on, and that turns out to be the entire question.
+If you find the algebra unhelpful, skip to the four conditions; you will lose
+nothing but precision.
+
+Think of an endpoint as a machine that takes a state and some bytes and gives
+you back a new state and something to look at. Let $\Sigma$ be the space of
+states the endpoint can be in, $W$ the byte strings that can arrive on the
+wire, and $O$ the things you can observe coming back. Parsing turns bytes into
+a document, and it is a \emph{partial} function $P : W \rightharpoonup D$
+because plenty of byte strings are not documents at all. Then the endpoint is
 
 \[
 E \;:\; \Sigma \times W \;\to\; \Sigma \times O .
 \]
 
-Write $E$ as the composition $E(\sigma, w) = X(\sigma, P(w))$, where $X$
-performs the effect on a parsed document. The authorization service holds its
-own parser $P'$ and a policy $\Pi$ over documents, and signs $w$ when
-$\Pi(P'(w))$ approves.
+Split that into two steps, $E(\sigma, w) = X(\sigma, P(w))$: first read the
+bytes, then act on what you read. And here is the part that matters. The
+program that decides policy has \emph{its own} parser, which I will call $P'$,
+and a policy $\Pi$ that looks at documents and approves or refuses. It signs
+$w$ when $\Pi(P'(w))$ says yes.
+
+Two parsers. $P$ and $P'$. Everything in this paper is downstream of the fact
+that we wrote two of them and then assumed they were one.
 
 \begin{definition}[Message authorization]
 A deployment provides message authorization if no party can cause the endpoint
@@ -335,120 +408,181 @@ resulting state transition and output $E(\sigma, w)$ are determined by
 $P'(w)$---the document the policy evaluated---and by nothing else.
 \end{definition}
 
-The two are independent. The retry case has message authorization and lacks
-effect binding. That is the whole point.
+These two are independent, and that independence is the entire paper. The
+retry case has message authorization. Nobody forged anything; every signature
+checked out. It does not have effect binding. If you only ever ask for the
+first property you will get it, and you will believe you got the second one,
+and nothing will tell you otherwise until the money is in the wrong account.
 
-The four conditions below are each pinned to code that checks them, in
-\texttt{src/classify.rs} of the accompanying implementation.
+So what would you have to demand to get the second one? Four things. Each is
+pinned to a function that checks it in \texttt{src/classify.rs}, so that if
+you disagree with a condition you can go read the code that enforces it rather
+than argue with a paragraph.
 
 \begin{description}[leftmargin=1.6em, style=nextline]
-\item[C1 --- Parameter completeness and default invariance.]
-Every input that influences the effect appears in the signed document.
-Formally, $X(\sigma, d)$ does not read any component of $\sigma$ that a
-client could have specified but did not. The failure mode is a server-side
-default: an omitted \texttt{fee\_tier} filled in from account state, so the
-policy approves an ordinary transfer and the endpoint performs an expedited
-one. Checked by \texttt{judge\_c1}.
+\item[C1 --- Put every input in the message.]
+Everything that changes what happens has to be in the document that got
+signed. Written out: $X(\sigma, d)$ must not read anything out of $\sigma$
+that the client could have said and didn't. The way this fails is so ordinary
+that it feels like a feature. You leave out \texttt{fee\_tier}; the server
+looks up your account preferences and fills in ``priority.'' The policy
+approved an ordinary transfer. The endpoint performed an expedited one. Nobody
+lied to anybody. Checked by \texttt{judge\_c1}.
 
-\item[C2 --- Representation injectivity.]
-$P$ and $P'$ agree, and each is injective on the meanings it admits: two wire
-forms that parse to one document must not exist, and one wire form must not
-parse to two documents under two parsers. The duplicate-key case violates the
-second half; a resource reachable as both \texttt{/v1/users/me} and
-\texttt{/v1/users/usr\_99812} violates the first. Checked by
+\item[C2 --- One meaning, one spelling.]
+$P$ and $P'$ have to agree, and each has to be injective on the meanings it
+accepts. That is two separate demands. Two different byte strings must not
+mean the same thing, and---this is the duplicate-key case---one byte string
+must not mean two different things to two different readers. The first half is
+violated by a resource you can reach as both \texttt{/v1/users/me} and
+\texttt{/v1/users/usr\_99812}; those are one thing wearing two names, and a
+signature over one of them says nothing about the other. Checked by
 \texttt{judge\_c2}.
 
-\item[C3 --- Strict idempotency with nonce-decoupled retries.]
-Repeated delivery of one authorized document produces one effect, and the
-identifier that establishes ``one document'' is distinct from the nonce that
-establishes freshness. Checked by \texttt{judge\_c3}, which treats the
-methods RFC~9110 defines as idempotent as satisfying it by construction.
+\item[C3 --- Make redelivery harmless, with two numbers not one.]
+Deliver the same authorized document ten times, get one effect. And the
+identifier that decides ``this is the same document'' must be a different
+thing from the nonce that decides ``this is fresh.'' That second clause is the
+whole repair from Section~\ref{sec:problem}, and leaving it out is what
+produces an endpoint that is idempotent in the brochure and not in practice.
+Checked by \texttt{judge\_c3}, which grants this for free to the methods
+RFC~9110 already defines as idempotent, because there the specification has
+done the work.
 
-\item[C4 --- Contextual state pinning.]
-Where the effect depends on state that can move between signing and
-execution, the document names the state it assumes, and the endpoint refuses
-if that assumption no longer holds. An \texttt{If-Match} precondition is the
-ordinary spelling. Checked by \texttt{judge\_c4}.
+\item[C4 --- Say what state you are assuming.]
+If the effect depends on something that can change between the moment you sign
+and the moment the endpoint acts, then the document has to name the state it
+is counting on, and the endpoint has to refuse when that has moved. In HTTP
+you spell this \texttt{If-Match}. The point is not the header. The point is
+that ``transfer \$100 if the balance is still what I saw'' is a different
+instruction from ``transfer \$100,'' and only one of them can be honoured
+safely by a machine acting minutes later. Checked by \texttt{judge\_c4}.
 \end{description}
 
 \section{Sufficient, and Not Known To Be Necessary}
 \label{sec:sufficiency}
 
-We claim that C1--C4 together are sufficient for effect binding. We do not
-claim they are necessary, and we want to be explicit about that because the
-source material we build on is not.
+Four conditions is a satisfying number. It has the shape of a finished result,
+and there is a real temptation, having got there, to say ``an endpoint is
+effect-binding \emph{if and only if} C1 through C4 hold'' and go to lunch.
 
-The desk study that preceded this work states its restated theorem as an
-``if and only if'' while establishing one direction. That is an overstatement,
-and it is the kind a reviewer will find first.
+I want to resist that, because we have not earned the second half.
 
-Sufficiency is the direction that carries the engineering weight. If every
-effect-relevant input is in the document (C1), the document has exactly one
-wire form and one meaning (C2), redelivery cannot multiply the effect (C3),
-and the assumed state is pinned (C4), then the effect is a function of the
-document the policy evaluated, which is what Definition~2 asks for.
+What we have is: if all four hold, you get effect binding. That is the
+direction with the engineering value in it, and the argument is short. If
+every input that matters is in the document (C1), and the document has exactly
+one spelling and exactly one meaning (C2), and delivering it repeatedly cannot
+multiply the effect (C3), and the state it assumes is named and checked (C4),
+then what the endpoint does is a function of the document the policy looked
+at. That is Definition~2. That is the whole proof, and its shortness is a
+point in its favour rather than against it.
 
-Necessity is open, and there are concrete reasons to doubt it. An endpoint
-could achieve effect binding by co-locating the monitor with the resource, in
-which case the reference-monitor assumption holds again and none of C1--C4 is
-needed as a message-level property. An endpoint whose effect is a total
-function over a fixed state space satisfies Definition~2 without pinning
-anything, because there is no state to move. Neither of these is exotic.
+What we do not have is the converse: that an endpoint failing one of these
+conditions must therefore fail to be effect-binding. And it is not merely
+unproven, it is doubtful, and I can give you two counterexamples off the top
+of my head.
 
-The distinction matters for a standard rather than only for a proof. A
-standard that mandates C1--C4 as necessary conditions would refuse to certify
-deployments that are, in fact, effect-binding by other means---and would tell
-an implementer that a co-located monitor is insufficient when it is not. We
-therefore state the conditions as a sufficient set and a conformance target,
-and we mark the necessity direction as open work.
+Put the monitor on the same machine as the resource. Now you are back in 1972,
+the reference-monitor assumption holds again, and there is no gap for any of
+C1--C4 to close. The endpoint is effect-binding and satisfies none of our
+message-level conditions, because it doesn't need to.
+
+Or take an endpoint whose effect is a total function of its input over a fixed
+state space---no stored state that can move. It satisfies Definition~2 without
+pinning anything, because there is nothing to pin. C4 is vacuous there.
+
+Neither of those is exotic. Someone will build both.
+
+The document this work grew out of states the result as an ``if and only if''
+while establishing one direction, and I want to name that plainly rather than
+inherit it quietly. It is the kind of thing a good referee finds in the first
+ten minutes, and it should not require a referee.
+
+Does the distinction matter, or is this pedantry? It matters, and specifically
+it matters for a standard rather than for a proof. Write C1--C4 into a
+standard as \emph{necessary} conditions and you have built a conformance
+regime that refuses to certify systems which are, in fact, doing the right
+thing by other means. You would be telling an engineer that their co-located
+monitor is insufficient. It is sufficient. Your standard is wrong.
+
+So: sufficient set, conformance target, and the converse marked as open. If
+somebody proves necessity later, good---and if somebody produces a third
+counterexample instead, that is good too, and rather more likely.
 
 \section{How We Checked}
 \label{sec:method}
 
-The harness, \transit{}, has three parts, and the relationship between them is
-the methodological argument.
+Conditions on paper are cheap. We wanted to find out whether they survive
+contact with real software, so we built a harness called \transit{}. It has
+three parts, and how they relate to each other \emph{is} the method---so I
+want to go through not just what each one does but why it is built that way
+and what would have gone wrong otherwise.
 
-\paragraph{One decoder, many behaviours.}
-Rather than depending on five language runtimes being installed, we wrote a
-single JSON parser parameterized by the decisions real decoders make
-differently: duplicate-key policy, lone surrogate handling, number range,
-Unicode normalization. Each configuration is a \emph{model} of a runtime, and
-a model is a claim. So we falsify them: where a runtime is present on the
-host, we run the same corpus through it as a subprocess and require the model
-to agree. Where a runtime is absent, the model still runs and the output
-labels it \texttt{Unverified}, in every format, on every row.
+\paragraph{One parser with knobs on it.}
+We could have written the differential test by requiring five language
+runtimes to be installed. Then the test would pass or fail depending on what
+happens to be on your laptop, which is a poor property for evidence.
 
-We state one substitution plainly. The canonical pair in the literature is
-Go's last-key-wins against Elixir's first-key-wins. No Elixir runtime exists
-on our development host. The acceptance test therefore asserts the divergence
-between two decoders that are genuinely present and independently
-written---a strict I-JSON decoder and \texttt{serde\_json}---and exercises
-first-key-wins through the Elixir model, labelled \texttt{Unverified}.
-First-key-wins on OTP~27 has since been measured directly on a separate
-machine, and that measurement is recorded as a fact about that machine. The
-local decoder remains a model regardless, and says so.
+Instead there is one JSON parser with the disagreements turned into settings:
+what to do with a duplicate key, what to do with a lone surrogate, how big a
+number may get, whether to normalize Unicode. Dial it one way and it behaves
+like Go. Dial it another and it behaves like Erlang.
 
-\paragraph{A hostile endpoint, as a pure function.}
-The endpoint under test is a function from state and request to state and
-response, with five failure modes that switch independently: lenient
-decoding, profile defaulting, URI aliasing, non-idempotent handling, and
-absent state pinning. The same function serves over HTTP and runs in-process,
-so the tests that matter need no socket and cannot flake.
+Now, that is a claim, not a fact. When I say ``this configuration behaves like
+Go,'' I am asserting something about Go that I could be wrong about, and if I
+am wrong the whole differential is theatre. So we try to prove ourselves
+wrong. Where a runtime \emph{is} installed, we shell out to it, push the same
+corpus through, and demand that the imitation and the real thing agree. Where
+the runtime is absent the model still runs, but every row of output carries the
+word \texttt{Unverified}, in every format, forever, until somebody actually
+checks it.
 
-Turning every failure mode off gives the \emph{boundable profile}, and it is
-the control. A check that produces a finding against the hostile
-configuration and nothing against the boundable one is evidence about the
-endpoint. A check that fires against both is evidence about the checker. Every
-acceptance test in the harness runs both halves for exactly this reason: a
-checker that returned a constant would pass the first half and fail the
-second.
+Here is a case in point, and I would rather tell you than have you find it.
+The famous example in this area is Go's last-key-wins against Elixir's
+first-key-wins. There is no Elixir on our development machine. So the
+acceptance test does \emph{not} assert that pair. It asserts a disagreement
+between two decoders that really are present and really were written
+independently---a strict I-JSON decoder and \texttt{serde\_json}---and it
+exercises first-key-wins through the Elixir model, which prints
+\texttt{Unverified} wherever it appears. We have since measured OTP~27
+directly on a different machine, and it does keep the first key. That is a
+fact about that machine. It does not promote the model on this one, and the
+tool does not pretend otherwise.
 
-\paragraph{An enforcement point, and its ceiling.}
-The last part is a reverse proxy that strict-ingests every request and
-forwards the canonical form rather than the wire form, so the upstream and the
-signer cannot be reading two spellings of one document. It is the deployable
-form of the argument, and its limits are as interesting as its function.
-Against the three attacks the harness reproduces:
+This is fussier than it needs to be if you trust us. The point is that you
+shouldn't have to.
+
+\paragraph{An endpoint built to be bad.}
+The thing under test is a function: state and request go in, new state and
+response come out. No sockets in the interesting path, so the tests cannot
+flake, and the same function is what gets served over HTTP when you want to
+poke it by hand.
+
+It has five separate ways of being wrong---sloppy decoding, filling in
+defaults from your profile, treating two URLs as one resource, forgetting
+idempotency, ignoring preconditions---and each one switches independently. Turn
+them all off and you get what we call the \emph{boundable profile}.
+
+That profile is the control, and controls are the part people skip. Suppose I
+write a check for the defaulting bypass and it reports a finding. Have I
+learned something about the endpoint? Not yet! A function that returns ``I
+found a bug'' unconditionally would also report a finding, and it would be
+useless. So every acceptance test runs the check twice: once against the
+hostile configuration, where it must find the bug, and once against the
+boundable one, where it must find nothing. A finding in the first and silence
+in the second is evidence about the endpoint. A finding in both is evidence
+about the checker, and it means you should go fix the checker before you tell
+anybody anything.
+
+\paragraph{Something you can actually deploy, and its ceiling.}
+The third part is a proxy you put in front of a real API. It reads every
+request strictly, and---this is the important bit---forwards the
+\emph{canonical} form rather than the bytes that arrived, so the endpoint
+behind it and whatever signed the request cannot be looking at two different
+spellings of one document.
+
+Its limits are more interesting than its function, so here is the whole
+scoreboard against the three attacks we reproduce:
 
 \begin{center}
 \begin{tabular}{lll}
@@ -462,47 +596,94 @@ URI alias collapse & C2 & \textbf{Passes} \\
 \end{tabular}
 \end{center}
 
-The third row is not a defect being tolerated. \texttt{GET /v1/users/me}
-carries no body and its path is untouched; a proxy has no way to know that
-\texttt{me} and \texttt{usr\_99812} name one resource. We assert that row as a
-passing request in the test suite, so that the claim cannot quietly widen in
-a later draft of the README.
+Look at the third row. That is not a bug we haven't got to yet. Think about
+what the proxy actually sees when \texttt{GET /v1/users/me} goes past: a
+method, a path, and no body at all. There is nothing in there to canonicalize
+and nothing to compare. For the proxy to know that \texttt{me} and
+\texttt{usr\_99812} are the same person, it would have to understand the
+application's identity model, at which point it is not a proxy any more, it is
+a second copy of the application, and now you have two of them to keep in
+agreement. The honest statement is that a proxy cannot close this, and no
+amount of engineering effort changes that.
+
+So we wrote a test that asserts the attack \emph{succeeds}. It is in the suite,
+it is green, and if somebody later makes the README claim that the proxy stops
+all three attacks, that test goes red. I recommend this trick generally. The
+claims that quietly grow in the retelling are exactly the ones nobody thought
+to write a test for, because who writes a test that something doesn't work?
+
+And the second row deserves a moment too. C1 is closed only if you list the
+parameters for that route in the configuration. If you don't, the defaulting
+bypass sails straight through. That means the proxy's usefulness depends on
+somebody doing homework, and the natural way to do that homework is to point
+the classifier at the API's specification and read off which parameters it
+says are optional. The tool that finds the problem and the tool that fixes it
+are the same tool, used twice.
 
 \section{The Survey We Inherited}
 \label{sec:survey}
 
-The desk study that preceded this work classified 24 production endpoints
-against C1--C4 and reported that 58.3\% (14 of 24) fail, 25.0\% (6 of 24) are
-conditional, and 16.7\% (4 of 24) qualify.
+This work inherited a survey. Somebody had gone through 24 production APIs,
+classified each against C1--C4 by reading the documentation, and reported that
+58.3\% (14 of 24) fail outright, 25.0\% (6 of 24) qualify conditionally, and
+16.7\% (4 of 24) qualify. Those percentages are quotable, and they had already
+been quoted.
 
-Counting its own table gives 4 qualified, 7 conditional, and 13
-non-qualifying. Square's \texttt{POST /v2/payments} is a Conditional row that
-the 25\% figure omits and the 58\% figure then absorbs. The rows are right;
-the arithmetic over them is not. An earlier draft of this paper repeated the
-published figures.
+We put the table into a data file so the tool could count it, because we had
+a rule that no number gets typed into this paper by hand. The tool counted 4,
+7, and 13.
 
-We found this because the harness refuses to let a number be typed into the
-paper. The survey lives as a data file, the counts are computed from it, and
-a test asserts the split. The correction is small, but it is the discipline
-working on its first application, and we report it rather than quietly
-publishing the corrected figures.
+That is not what the prose said. So one of them is wrong, and the useful
+question is which.
 
-The wider point is more important than the arithmetic. Twenty-four endpoints
-chosen for sector coverage is a convenience sample, and a classification
-derived from reading documentation is a hypothesis about implementations. C1
-and C4 in particular are properties of implementations that no document
-reveals: a specification cannot tell you what a server fills in from account
-state, and cannot tell you whether an effect depends on state that moved. So
-54\% is not a population estimate any more than 58\% was. It is a taxonomy
-with illustrative cases, and every rendering of the table in this repository
-carries a banner saying so---including the generated \LaTeX{}, so that the
-table cannot be pasted into a paper without the caveat travelling with it.
+It's the prose. Square's \texttt{POST /v2/payments} is sitting right there in
+the table as a conditional row, and the 25\% figure doesn't include it, and the
+58\% figure has swallowed it. The rows were fine all along. Somebody counted
+them by hand once, and the count went into the text, and after that everyone
+including us quoted the text instead of recounting the rows. An earlier draft
+of this very paper repeated the published figures.
+
+I want to dwell on this for a moment, because the arithmetic is trivial and
+the lesson isn't. We did not find this by being clever. We found it because we
+had made it impossible to write the number down without computing it, and the
+computation disagreed. The rule cost almost nothing to adopt and it caught
+something on its first application. That is a better argument for the rule
+than any amount of methodology talk.
+
+And now the part that the corrected number does not entitle anyone to skip.
+Twenty-four endpoints chosen to cover a spread of industries is not a random
+sample of anything. It was assembled for coverage, which is the right way to
+assemble a set of illustrations and the wrong way to assemble a basis for
+percentages. Worse, every one of these classifications came from reading
+documentation, and two of our four conditions are not visible in documentation
+even in principle. No specification will tell you what a server quietly fills
+in from your account settings. No specification will tell you whether an
+effect depends on state that moved while you weren't looking. Those are facts
+about running code.
+
+So 54\% is not a fact about the world's APIs. Neither was 58\%. What we have
+is a taxonomy with two dozen worked examples, which is genuinely useful and is
+not a measurement, and the difference between those two things is most of what
+this section is about.
+
+Because that distinction is easy to lose in transit, every rendering of this
+table carries a banner saying it is a hypothesis---including the generated
+\LaTeX{}, where the banner is the caption. You cannot \texttt{\textbackslash
+input} the table into a document without the caveat coming along with it. We
+did that deliberately, after noticing how easily we had ourselves absorbed the
+original percentages.
 
 % ===== PLACEHOLDER: results not yet written up =====
 \section{Does It Actually Work?}
 \label{sec:results}
 % RESULTS PLACEHOLDER — every number below arrives from ../results/, written
 % by scripts/regen-results.sh and regenerated in CI. Do not type numbers here.
+
+Every number in this section is generated. None of it is typed. The tables
+below are written by \texttt{scripts/regen-results.sh}, the build regenerates
+them and fails if they have drifted from the code, and the reason for all that
+machinery is in Section~\ref{sec:survey}: we tried the other way and it put a
+wrong percentage into circulation.
 
 \subsection{Where decoders disagree}
 
@@ -518,36 +699,57 @@ table cannot be pasted into a paper without the caveat travelling with it.
 \section{What We Still Don't Know}
 \label{sec:openwork}
 
-\paragraph{The checkability problem.}
-This is the crux, and it undercuts the survey more than any sampling
-objection. C1 and C4 are properties of implementations, not of published
-interfaces. Absent source access, classifying an endpoint means inferring
-implementation behaviour from documentation and black-box probing, and the
-credibility of any survey rests entirely on how that inference is made. Our
-classifier returns \texttt{Unknown} rather than a verdict wherever a document
-cannot answer, which is honest but is not a measurement. Turning these rows
-into evidence requires probing running endpoints under authorization, and we
-have built the gate for that but not run it.
+This is the section I would read first if somebody handed me this paper, so I
+have tried to make it the honest one rather than the modest-sounding one.
 
-\paragraph{Verification without cooperation.}
-Everything above assumes you can ask the endpoint questions. An auditor who
-wants to know whether a third-party API is effect-binding, without an account
-and without permission, has no method we know of that is both sound and
-lawful.
+\paragraph{We mostly cannot check the thing we are asking you to check.}
+Start with the worst of it. Two of our four conditions---C1 and C4---are
+properties of running code, not of published interfaces. If you do not have
+the source, classifying an endpoint means inferring what the implementation
+does from what its documentation says and from poking at it, and the entire
+credibility of any survey rests on how that inference gets made.
 
-\paragraph{What replaces binding where it cannot be had.}
-Thirteen of twenty-four endpoints in the survey cannot satisfy the conditions
-without changing their interfaces, and most of them will not. Detection after
-the fact, bounded exposure, and compensating controls are the realistic
-answers, and none of them is developed here.
+Our classifier answers \texttt{Unknown} whenever a document cannot settle the
+question, and refuses to guess. That is honest. It is also not a measurement,
+and I do not want the honesty to be mistaken for rigour. The way to turn these
+rows into evidence is to probe endpoints that are actually running. We built
+the gate that would let somebody do that safely---it demands a written
+declaration of authorization, a contact address, and a command-line flag, and
+refuses otherwise---and then we did not run it. So the empirical half of this
+paper is a plan, not a result, and Section~\ref{sec:survey} is a hypothesis
+wearing a table.
 
-\paragraph{Composition.}
-This paper treats one authorized message and one effect. Agents perform
-workflows: a sequence of calls where each step's inputs depend on earlier
-steps' outputs. Whether effect binding composes across such a sequence---and
-what an authorized \emph{plan}, as opposed to an authorized message, would
-even mean---is untouched, and is arguably the question the agent setting
-actually poses.
+\paragraph{Checking somebody who isn't helping you.}
+Everything above assumes you may ask the endpoint questions. Suppose you may
+not: you are an auditor, or a customer doing diligence, and you have no
+account and no permission. Is there any way to establish whether a third-party
+API is effect-binding? We do not know of one that is both sound and lawful,
+and I suspect this is hard rather than merely unexplored.
+
+\paragraph{What do you do about the ones that can't be fixed?}
+Thirteen of the twenty-four endpoints in that survey cannot satisfy these
+conditions without changing their public interfaces, and most of them are not
+going to. Telling those operators ``adopt C1--C4'' is not advice, it is a
+complaint. The real answers are presumably about detecting the damage
+afterwards, keeping the blast radius small, and compensating controls---and we
+have developed none of that here.
+
+\paragraph{Two calls in a row.}
+Now for the one I think is actually the important open problem. This entire
+paper is about one authorized message producing one effect. That is not what
+agents do. An agent runs a workflow: call something, look at the answer,
+decide what to call next, feed the result into the one after that. Each step's
+input depends on the previous step's output, so the thing a user approved at
+the start was not a message at all---it was closer to a goal.
+
+Does effect binding compose across such a sequence? We don't know. What would
+it even mean to authorize a \emph{plan} rather than a message, when the plan's
+later steps are not determined until the earlier ones return? We don't know
+that either, and I am not sure the vocabulary exists yet.
+
+We have said nothing about it in this paper. It is very likely the question
+the whole agent business actually poses, and the four conditions here are, at
+best, what you would need to have settled before you could begin asking it.
 
 \bibliographystyle{plain}
 \bibliography{references}
