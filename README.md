@@ -283,11 +283,20 @@ task seven of thirteen.
 
 ## The paper
 
-**Not written yet.** *From Message Authorization to Effect Binding: Conditions,
-Counterexamples, and a Conformance Harness* is the last task in the plan, and
-the results sections will read generated LaTeX from `results/` rather than
-hand-typed numbers — CI regenerates them and fails on drift, so a figure in the
-paper cannot disagree with the code that produced it.
+[**From Message Authorization to Effect Binding: Conditions, Counterexamples,
+and a Conformance Harness**](paper/main.pdf) — 12 pages, readable in the
+browser, no toolchain needed.
+
+**Draft, and one section is a placeholder.** Sections 1–6 and 8 are written:
+the retry ambiguity worked all the way through, the four conditions, why we
+claim sufficiency and not necessity, the method, and what we still don't know.
+Section 7 renders its tables but the prose reading them is unwritten, and the
+source marks it `% ===== PLACEHOLDER =====`.
+
+Every number in it is generated from `results/` rather than typed — CI
+regenerates those and fails on drift, so a figure in the paper cannot disagree
+with the code that produced it. That rule caught a real error on its first
+use; see §6.
 
 Its sibling, [**A Trust Calculus for Attestation
 Tiers**](https://github.com/Task-force-for-AI-agents-in-Healthcare/parallax/blob/main/paper/main.pdf),

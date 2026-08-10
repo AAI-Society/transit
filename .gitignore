@@ -1,5 +1,9 @@
 /target
 paper/*.pdf
+# ...except the paper itself. Committed so it can be read in the browser
+# without a LaTeX toolchain. Regenerate with `cd paper && tectonic main.tex`
+# whenever main.tex or anything under results/ changes.
+!paper/main.pdf
 paper/*.aux
 paper/*.log
 paper/*.out

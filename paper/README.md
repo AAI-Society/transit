@@ -47,7 +47,15 @@ cd paper
 tectonic main.tex
 ```
 
-Output: `main.pdf`.
+Output: `main.pdf`, which is committed to the repository so it can be read
+without building anything.
+
+**It is not diff-gated in CI, and it is the one generated artefact that
+isn't.** Tectonic stamps a `CreationDate` into the PDF, so two builds of
+identical sources differ byte-for-byte and a `git diff --exit-code` check would
+fail on every run. CI builds the paper to prove it still compiles; keeping the
+committed PDF current is a manual step. If you change `main.tex` or regenerate
+`../results/`, rebuild and commit the PDF in the same commit.
 
 `-Z shell-escape` is *not* required. The sibling paper needs it for `minted`,
 which shells out to pygments; this preamble deliberately omits `minted` and
@@ -95,5 +103,5 @@ flag anyway is harmless.
 | --- | --- |
 | `main.tex` | The paper (compiles with tectonic, XeTeX engine) |
 | `references.bib` | Bibliography: RFCs, the capability and complete-mediation literature, the parser-differential family, ISO 20022 |
-| `main.pdf` | Compiled output. Build artefact — not committed |
+| `main.pdf` | Compiled output. **Committed**, so it can be read in the browser without a LaTeX toolchain — regenerate and commit it whenever `main.tex` or anything under `../results/` changes |
 | `../results/*.tex` | Generated tables the paper `\input`s. Never hand-edit |
